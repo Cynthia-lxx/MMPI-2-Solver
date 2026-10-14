@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MMPI-2 反算器</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --line: #e3e6ea;
+    --ink: #1c2330;
+    --muted: #6b7481;
+    --accent: #2f6feb;
+    --ok: #157f4a;
+    --ok-bg: #e8f6ee;
+    --bad: #b3261e;
+    --bad-bg: #fdecea;
+    --free: #7a5cc4;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.55 "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  header {
+    padding: 18px 24px 14px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 { margin: 0; font-size: 19px; font-weight: 650; }
+  header p { margin: 3px 0 0; color: var(--muted); font-size: 13px; }
+
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+    padding: 12px 24px; background: var(--panel);
+    border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5;
+  }
+  .toolbar label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; }
+  .toolbar select, .toolbar input, textarea {
+    font: inherit; color: var(--ink); background: #fff;
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+  }
+  .spacer { flex: 1 1 auto; }
+  button {
+    font: inherit; padding: 6px 13px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--line); background: #fff; color: var(--ink);
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover:not(:disabled) { color: #fff; filter: brightness(1.08); }
+
+  main {
+    display: grid; grid-template-columns: minmax(320px, 380px) 1fr;
+    gap: 18px; padding: 18px 24px 40px; align-items: start;
+  }
+  @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px 16px 18px;
+  }
+  .panel h2 { margin: 0 0 10px; font-size: 15px; font-weight: 650; }
+  .panel h3 { margin: 18px 0 8px; font-size: 14px; font-weight: 650; }
+  .panel h4 { margin: 12px 0 6px; font-size: 13px; font-weight: 650; color: var(--muted); }
+
+  #search { width: 100%; margin-bottom: 10px; }
+  .group { border-bottom: 1px solid var(--line); }
+  .group:last-child { border-bottom: 0; }
+  .group > summary {
+    cursor: pointer; padding: 7px 0; font-size: 13px; font-weight: 600; color: var(--muted);
+  }
+  .group > summary .count {
+    margin-left: 6px; font-weight: 400; font-size: 11px;
+    background: #eef1f5; border-radius: 20px; padding: 1px 7px;
+  }
+  .rows { padding-bottom: 8px; }
+  .row {
+    display: grid; grid-template-columns: 52px 78px 1fr; gap: 8px;
+    align-items: center; padding: 2px 0;
+  }
+  .row .abbr { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .row select { font: inherit; border: 1px solid var(--line); border-radius: 5px; padding: 2px 4px; background: #fff; }
+  .row .full { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .bulk { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .bulk summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); }
+  .bulk textarea { width: 100%; margin: 8px 0 6px; font-family: ui-monospace, Consolas, monospace; }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .note, .status { font-size: 13px; }
+  .note { color: var(--muted); margin: 6px 0; }
+  .status { padding: 9px 12px; border-radius: 7px; background: #eef1f5; margin-bottom: 12px; }
+  .status.ok { background: var(--ok-bg); color: var(--ok); }
+  .status.bad { background: var(--bad-bg); color: var(--bad); }
+  .status.busy { background: #e8eefc; color: var(--accent); }
+
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  th { color: var(--muted); font-weight: 600; }
+  td.full { color: var(--muted); }
+  tr.ok td { color: var(--ok); }
+  tr.bad td { color: var(--bad); }
+  tr.targeted { background: #f4f8ff; }
+  td.t { font-weight: 600; }
+  td.t.mid { color: #b26a00; }
+  td.t.hi { color: var(--bad); }
+
+  .chip {
+    margin-left: 8px; font-weight: 400; font-size: 12px; color: var(--free);
+    background: #f1ecfb; border-radius: 20px; padding: 2px 10px;
+  }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(54px, 1fr));
+    gap: 4px; margin-top: 8px;
+  }
+  .cell {
+    border: 1px solid var(--line); border-radius: 5px; padding: 3px 4px;
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 11px; background: #fbfbfc;
+  }
+  .cell .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .cell b { font-size: 12px; }
+  .cell.is-t b { color: var(--accent); }
+  .cell.is-f b { color: #9aa2ad; }
+  .cell.locked { border-style: solid; opacity: .78; }
+  .cell.free { border-style: dashed; border-color: var(--free); cursor: pointer; background: #fbfaff; }
+  .cell.free:hover { background: #f1ecfb; }
+  .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+  /* 导入 / 导出面板 */
+  .io { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+  .io summary { cursor: pointer; font-weight: 600; font-size: 13px; color: var(--accent); }
+  .io textarea { width: 100%; margin: 8px 0 6px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  .checks { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+  label.check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; }
+  .io .actions { gap: 6px; flex-wrap: wrap; }
+  .io .actions input[type=file] { font-size: 12px; max-width: 190px; }
+  td.raw, td.dim { color: var(--muted); font-variant-numeric: tabular-nums; }
+  /* 题干模式：一格一题，文字换行显示 */
+  .grid.with-text { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .grid.with-text .cell { flex-direction: column; align-items: stretch; gap: 2px; padding: 5px 7px; }
+  .cell .q { font-size: 11px; line-height: 1.45; color: #3c4450; }
+  td.dim { color: var(--muted); }
+  td.hot { color: #c0392b; font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MMPI-2 反算器</h1>
+  <p>指定预期 T 分，反求出满足该剖面的 567 题答卷，并标出哪些题目的回答是被锁定的、哪些可以自由组合。</p>
+</header>
+
+<div class="toolbar">
+  <label>性别
+    <select id="gender"><option value="male">男</option><option value="female">女</option></select>
+  </label>
+  <label>VRIN / TRIN
+    <select id="vrin-mode">
+      <option value="legacy">原程序公式</option>
+      <option value="fixed">修正公式</option>
+    </select>
+  </label>
+  <label>求解强度
+    <select id="strength">
+      <option value="quick">快速</option>
+      <option value="standard" selected>标准</option>
+      <option value="deep">深度</option>
+    </select>
+  </label>
+  <label class="check"><input id="show-text" type="checkbox"> 显示题干</label>
+  <span class="spacer"></span>
+  <button id="example">载入示例</button>
+  <button id="clear">清空</button>
+</div>
+
+<main>
+  <section class="panel">
+    <h2>目标 T 分</h2>
+    <input id="search" type="search" placeholder="搜索量表（如 Sc、Bizarre）">
+    <div id="scale-list"></div>
+    <details class="bulk">
+      <summary>批量输入</summary>
+      <textarea id="bulk" rows="5" placeholder="每行一个，支持 Hs=70、Sc 81、Pt:74"></textarea>
+      <button id="bulk-apply">应用</button>
+    </details>
+
+    <details class="io">
+      <summary>导入答卷并评分</summary>
+      <textarea id="import-text" rows="4"
+        placeholder="粘贴 567 个字符的 T/F 串，或每行一个答案（T / F、True / False、是 / 否），也可每行「题号,答案」"></textarea>
+      <div class="actions">
+        <input id="import-file" type="file" accept=".txt,.csv,.tsv">
+        <button id="import-score">评分</button>
+        <button id="import-target">用作求解目标</button>
+      </div>
+      <p id="import-note" class="hint"></p>
+      <p class="hint">评分只算剖面，不求解。未作答的题会随机填充（会告诉你填了哪些）。
+        「用作求解目标」把读入剖面的 13 个基本量表设为目标，便于反推等价答卷。</p>
+    </details>
+
+    <details class="io" open>
+      <summary>导出表格</summary>
+      <div id="export-contents" class="checks"></div>
+      <div class="actions">
+        <label>格式
+          <select id="export-format"></select>
+        </label>
+        <button id="export-run-panel">导出</button>
+      </div>
+      <label class="check"><input id="export-english" type="checkbox" checked> 含英文题干</label>
+      <p class="hint">xlsx 会把勾选的内容各放一张表；其余格式按顺序拼接。
+        空白答题模板不需要先求解，可以直接拿去给人作答。</p>
+    </details>
+  </section>
+
+  <section class="panel">
+    <h2>答卷</h2>
+    <div class="actions">
+      <button id="solve" class="primary" disabled>生成答卷</button>
+      <button id="again" disabled>换一组</button>
+      <button id="shuffle" disabled>随机化自由题</button>
+      <button id="copy" disabled>复制 T/F</button>
+      <button id="csv" disabled>导出 CSV</button>
+    </div>
+    <p id="note" class="note"></p>
+    <div id="status" class="status">请在左侧指定至少一个量表的目标 T 分。</div>
+
+    <div id="results" hidden>
+      <h3>目标达成</h3>
+      <table id="target-table"></table>
+
+      <details>
+        <summary>完整剖面（87 个量表，橙色 ≥ 65、红色 ≥ 80）</summary>
+        <div id="profile"></div>
+      </details>
+
+      <h3>567 题回答<span id="free-count" class="chip"></span></h3>
+      <p class="hint">虚线框为「自由题」：翻转它不会改变任何目标量表的分数，点击即可切换；
+        实线框为锁定题，翻转会破坏目标（悬停可看它影响哪些量表）。</p>
+      <div id="answers" class="grid"></div>
+    </div>
+  </section>
+</main>
+
+<script type="module" src="./gui.js"></script>
+</body>
+</html>
