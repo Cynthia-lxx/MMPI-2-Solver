@@ -1343,6 +1343,25 @@ function wire() {
       invalidate('预期值模式已切换，请重新生成答卷。');
     });
   }
+  // 主题切换：label 跟着当前 data-theme 走；选择写回 localStorage
+  const syncThemeLabel = () => {
+    if (!dom.themeToggle) return;
+    const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    dom.themeToggle.textContent = dark ? '☀ 浅色' : '🌙 深色';
+  };
+  if (dom.themeToggle) {
+    syncThemeLabel();
+    dom.themeToggle.addEventListener('click', () => {
+      const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try {
+        localStorage.setItem('mmpi-theme', next);
+      } catch {
+        /* localStorage 不可用时忽略，仅本次会话内切换 */
+      }
+      syncThemeLabel();
+    });
+  }
   dom.solve.addEventListener('click', () => runPlan());
   dom.again.addEventListener('click', () => runPlan({ newSeed: true }));
   dom.shuffle.addEventListener('click', () => {
@@ -1457,7 +1476,7 @@ export function init() {
     'export-contents', 'export-format', 'export-english', 'export-run-panel',
     'import-text', 'import-file', 'import-score', 'import-target', 'import-note',
     'text-lang', 'bank-search', 'bank-filter', 'bank-table', 'bank-count',
-    'target-mode',
+    'target-mode', 'theme-toggle',
   ];
   dom = {};
   for (const id of ids) {

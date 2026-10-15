@@ -194,5 +194,18 @@ const afterSlack = $('answers').querySelector(`.cell[data-item="${slackItem}"] b
 check(afterSlack !== beforeSlack, '点击区间内可翻转题可切换', `${beforeSlack} -> ${afterSlack}`);
 check($('free-count').textContent.includes('区间内'), '组合数提示含区间内可翻转题', JSON.stringify($('free-count').textContent));
 
+/* 主题切换 ----------------------------------------------------------- */
+check(!!$('theme-toggle'), '存在主题切换按钮');
+const themeBefore = document.documentElement.getAttribute('data-theme');
+$('theme-toggle').click();
+const themeAfter = document.documentElement.getAttribute('data-theme');
+check(themeBefore !== themeAfter, '点击切换深浅色', `${themeBefore} -> ${themeAfter}`);
+check(
+  $('theme-toggle').textContent.includes(themeAfter === 'dark' ? '浅色' : '深色'),
+  '按钮文字随主题更新'
+);
+$('theme-toggle').click();
+check(document.documentElement.getAttribute('data-theme') === themeBefore, '再次点击回到原主题');
+
 console.log(`\n${failures === 0 ? 'ALL OK' : failures + ' FAILURES'}`);
 process.exit(failures === 0 ? 0 : 1);

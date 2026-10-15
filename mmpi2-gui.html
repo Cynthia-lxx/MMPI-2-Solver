@@ -17,6 +17,47 @@
     --bad: #b3261e;
     --bad-bg: #fdecea;
     --free: #7a5cc4;
+    --warn: #b26a00;
+    /* 派生面：输入框、单元格、代码块等，深浅色各自覆盖 */
+    --input-bg: #ffffff;
+    --cell-bg: #fbfbfc;
+    --code-bg: #eef1f5;
+    --targeted-bg: #f4f8ff;
+    --free-bg: #fbfaff;
+    --free-hover: #f1ecfb;
+    --slack-bg: #f3f7ff;
+    --slack-hover: #e6effd;
+    --chip-bg: #f1ecfb;
+    --th-bg: #f7f8fa;
+    --q-ink: #3c4450;
+    --busy-bg: #e8eefc;
+  }
+  /* 深色模式：由 <html data-theme="dark"> 驱动，首次访问跟随系统偏好 */
+  :root[data-theme="dark"] {
+    --bg: #0f1320;
+    --panel: #1a2030;
+    --line: #2a3346;
+    --ink: #e6e9f0;
+    --muted: #98a2b3;
+    --accent: #5b8bff;
+    --ok: #4cc38a;
+    --ok-bg: #142a20;
+    --bad: #ff6b61;
+    --bad-bg: #2e1816;
+    --free: #b79cf0;
+    --warn: #e0a64b;
+    --input-bg: #111726;
+    --cell-bg: #161d2c;
+    --code-bg: #1c2333;
+    --targeted-bg: #16223a;
+    --free-bg: #1a1530;
+    --free-hover: #241a3f;
+    --slack-bg: #14233f;
+    --slack-hover: #1b2f54;
+    --chip-bg: #241a3f;
+    --th-bg: #161d2c;
+    --q-ink: #c3c9d6;
+    --busy-bg: #16223a;
   }
   * { box-sizing: border-box; }
   body {
@@ -40,13 +81,13 @@
   }
   .toolbar label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; }
   .toolbar select, .toolbar input, textarea {
-    font: inherit; color: var(--ink); background: #fff;
+    font: inherit; color: var(--ink); background: var(--input-bg);
     border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
   }
   .spacer { flex: 1 1 auto; }
   button {
     font: inherit; padding: 6px 13px; border-radius: 6px; cursor: pointer;
-    border: 1px solid var(--line); background: #fff; color: var(--ink);
+    border: 1px solid var(--line); background: var(--input-bg); color: var(--ink);
   }
   button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
   button:disabled { opacity: .45; cursor: not-allowed; }
@@ -57,7 +98,46 @@
     display: grid; grid-template-columns: minmax(320px, 380px) 1fr;
     gap: 18px; padding: 18px 24px 40px; align-items: start;
   }
-  @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+  /* 平板及以下：单列堆叠（PC / 平板横屏仍走双列） */
+  @media (max-width: 1024px) { main { grid-template-columns: 1fr; } }
+
+  /* 大屏：限制内容宽度并加宽留白，避免超宽显示器上控件被拉散 */
+  @media (min-width: 1400px) {
+    main { max-width: 1480px; margin: 0 auto; gap: 24px; }
+    header, .toolbar { padding-left: 40px; padding-right: 40px; }
+  }
+
+  /* 手机 / 小屏：控件横滑、网格更密、表格收窄 */
+  @media (max-width: 640px) {
+    header { padding: 12px 14px 10px; }
+    header h1 { font-size: 17px; }
+    header p { font-size: 12px; }
+    .toolbar {
+      flex-wrap: nowrap; overflow-x: auto; gap: 10px;
+      padding: 10px 14px; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+    }
+    .toolbar::-webkit-scrollbar { display: none; }
+    .toolbar label, .toolbar .check { flex: 0 0 auto; white-space: nowrap; font-size: 12px; }
+    .toolbar .spacer { flex: 0 0 4px; }
+    main { padding: 12px 14px 32px; gap: 14px; }
+    .panel { padding: 12px 12px 16px; }
+    .grid { grid-template-columns: repeat(auto-fill, minmax(48px, 1fr)); gap: 3px; }
+    .grid.with-text { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+    .cell { min-height: 38px; }
+    .bank-wrap { max-height: 62vh; }
+    table { font-size: 12px; }
+  }
+
+  /* 横屏但高度很矮（手机横屏）：压缩头部与工具栏，题库面板降低高度 */
+  @media (orientation: landscape) and (max-height: 520px) {
+    header { padding-top: 8px; padding-bottom: 6px; }
+    .toolbar { padding-top: 6px; padding-bottom: 6px; }
+    .bank-wrap { max-height: 46vh; }
+  }
+
+  /* 主题切换按钮：幽灵样式，不抢视觉重心 */
+  button.ghost { background: transparent; }
+  button.ghost:hover:not(:disabled) { background: var(--code-bg); }
 
   .panel {
     background: var(--panel); border: 1px solid var(--line);
@@ -75,7 +155,7 @@
   }
   .group > summary .count {
     margin-left: 6px; font-weight: 400; font-size: 11px;
-    background: #eef1f5; border-radius: 20px; padding: 1px 7px;
+    background: var(--code-bg); border-radius: 20px; padding: 1px 7px;
   }
   .rows { padding-bottom: 8px; }
   .row {
@@ -86,7 +166,7 @@
   .rows.two .row { grid-template-columns: 52px 66px 66px 1fr; }
   .row select { width: 100%; }
   .row .abbr { font-weight: 600; font-variant-numeric: tabular-nums; }
-  .row select { font: inherit; border: 1px solid var(--line); border-radius: 5px; padding: 2px 4px; background: #fff; }
+  .row select { font: inherit; border: 1px solid var(--line); border-radius: 5px; padding: 2px 4px; background: var(--input-bg); }
   .row .full { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .bulk { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
@@ -96,10 +176,10 @@
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
   .note, .status { font-size: 13px; }
   .note { color: var(--muted); margin: 6px 0; }
-  .status { padding: 9px 12px; border-radius: 7px; background: #eef1f5; margin-bottom: 12px; }
+  .status { padding: 9px 12px; border-radius: 7px; background: var(--code-bg); margin-bottom: 12px; }
   .status.ok { background: var(--ok-bg); color: var(--ok); }
   .status.bad { background: var(--bad-bg); color: var(--bad); }
-  .status.busy { background: #e8eefc; color: var(--accent); }
+  .status.busy { background: var(--busy-bg); color: var(--accent); }
 
   table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
   th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); font-size: 13px; }
@@ -107,14 +187,14 @@
   td.full { color: var(--muted); }
   tr.ok td { color: var(--ok); }
   tr.bad td { color: var(--bad); }
-  tr.targeted { background: #f4f8ff; }
+  tr.targeted { background: var(--targeted-bg); }
   td.t { font-weight: 600; }
-  td.t.mid { color: #b26a00; }
+  td.t.mid { color: var(--warn); }
   td.t.hi { color: var(--bad); }
 
   .chip {
     margin-left: 8px; font-weight: 400; font-size: 12px; color: var(--free);
-    background: #f1ecfb; border-radius: 20px; padding: 2px 10px;
+    background: var(--chip-bg); border-radius: 20px; padding: 2px 10px;
   }
   .grid {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(54px, 1fr));
@@ -123,19 +203,20 @@
   .cell {
     border: 1px solid var(--line); border-radius: 5px; padding: 3px 4px;
     display: flex; justify-content: space-between; align-items: baseline;
-    font-size: 11px; background: #fbfbfc;
+    font-size: 11px; background: var(--cell-bg);
+    min-height: 30px;
   }
   .cell .n { color: var(--muted); font-variant-numeric: tabular-nums; }
   .cell b { font-size: 12px; }
   .cell.is-t b { color: var(--accent); }
-  .cell.is-f b { color: #9aa2ad; }
+  .cell.is-f b { color: var(--muted); }
   .cell.locked { border-style: solid; opacity: .78; }
   /* 区间目标下，翻转后目标仍全部落在区间内的题 */
-  .cell.slack { border-style: dashed; border-color: var(--accent); background: #f3f7ff; cursor: pointer; }
-  .cell.slack:hover { background: #e6effd; }
-  .chip.slack { color: var(--accent); background: #e6effd; }
-  .cell.free { border-style: dashed; border-color: var(--free); cursor: pointer; background: #fbfaff; }
-  .cell.free:hover { background: #f1ecfb; }
+  .cell.slack { border-style: dashed; border-color: var(--accent); background: var(--slack-bg); cursor: pointer; }
+  .cell.slack:hover { background: var(--slack-hover); }
+  .chip.slack { color: var(--accent); background: var(--slack-hover); }
+  .cell.free { border-style: dashed; border-color: var(--free); cursor: pointer; background: var(--free-bg); }
+  .cell.free:hover { background: var(--free-hover); }
   .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
   /* 导入 / 导出面板 */
   .io { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
@@ -149,7 +230,7 @@
   /* 题干模式：一格一题，文字换行显示 */
   .grid.with-text { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
   .grid.with-text .cell { flex-direction: column; align-items: stretch; gap: 2px; padding: 5px 7px; }
-  .cell .q { font-size: 11px; line-height: 1.45; color: #3c4450; }
+  .cell .q { font-size: 11px; line-height: 1.45; color: var(--q-ink); }
   td.dim { color: var(--muted); }
   td.hot { color: #c0392b; font-weight: 600; }
   /* 题库：567 题原文一览 */
@@ -159,18 +240,32 @@
   .bank-controls .hint { margin: 0; }
   .bank-wrap { max-height: 480px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
   .bank-wrap table { font-size: 12.5px; }
-  .bank-wrap thead th { position: sticky; top: 0; background: #f7f8fa; z-index: 1; }
+  .bank-wrap thead th { position: sticky; top: 0; background: var(--th-bg); z-index: 1; }
   .bank-wrap td.n { width: 52px; color: var(--muted); }
   .bank-wrap td.orig { width: 38%; }
   .bank-wrap td.zh { width: 30%; }
   .bank-wrap td.ans, .bank-wrap td.st { width: 66px; text-align: center; }
   .bank-wrap td.ans.is-t { color: var(--accent); font-weight: 600; }
-  .bank-wrap td.ans.is-f { color: #9aa2ad; }
+  .bank-wrap td.ans.is-f { color: var(--muted); }
   .bank-wrap td.st.free { color: var(--free); }
   .bank-wrap td.st.locked { color: var(--bad); }
   .bank-wrap tr.locked td.orig { opacity: .78; }
   .cell .q .en { display: block; color: var(--muted); font-size: 10.5px; }
 </style>
+<!-- 防闪烁：在首屏绘制前定下主题，默认跟随系统偏好 -->
+<script>
+  (function () {
+    try {
+      var t = localStorage.getItem('mmpi-theme');
+      if (t !== 'light' && t !== 'dark') {
+        t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.documentElement.setAttribute('data-theme', t);
+    } catch (e) {
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+  })();
+</script>
 </head>
 <body>
 <header>
@@ -207,6 +302,7 @@
     </select>
   </label>
   <span class="spacer"></span>
+  <button id="theme-toggle" class="ghost" type="button">🌙 深色</button>
   <button id="example">载入示例</button>
   <button id="clear">清空</button>
 </div>
@@ -3029,6 +3125,25 @@ function wire() {
       invalidate('预期值模式已切换，请重新生成答卷。');
     });
   }
+  // 主题切换：label 跟着当前 data-theme 走；选择写回 localStorage
+  const syncThemeLabel = () => {
+    if (!dom.themeToggle) return;
+    const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    dom.themeToggle.textContent = dark ? '☀ 浅色' : '🌙 深色';
+  };
+  if (dom.themeToggle) {
+    syncThemeLabel();
+    dom.themeToggle.addEventListener('click', () => {
+      const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try {
+        localStorage.setItem('mmpi-theme', next);
+      } catch {
+        /* localStorage 不可用时忽略，仅本次会话内切换 */
+      }
+      syncThemeLabel();
+    });
+  }
   dom.solve.addEventListener('click', () => runPlan());
   dom.again.addEventListener('click', () => runPlan({ newSeed: true }));
   dom.shuffle.addEventListener('click', () => {
@@ -3143,7 +3258,7 @@ function init() {
     'export-contents', 'export-format', 'export-english', 'export-run-panel',
     'import-text', 'import-file', 'import-score', 'import-target', 'import-note',
     'text-lang', 'bank-search', 'bank-filter', 'bank-table', 'bank-count',
-    'target-mode',
+    'target-mode', 'theme-toggle',
   ];
   dom = {};
   for (const id of ids) {
