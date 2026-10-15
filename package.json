@@ -6,6 +6,7 @@
   "private": true,
   "scripts": {
     "serve": "python serve.py",
+    "build": "node build-site.mjs",
     "test": "node test-inverse.mjs && node test-gui.mjs && node test-sheet.mjs",
     "test:dom": "node test-dom.mjs"
   }

@@ -4,10 +4,10 @@
  *   npm install jsdom   (optional)
  *   node web/test-dom.mjs
  *
- * It loads the built single-file page (web/mmpi2-gui.html -- jsdom cannot run
- * ES modules, so index.html's <script type="module"> is out), picks a target
- * through the real <select>, presses 生成答卷 and checks that the answer grid
- * and the free/locked marking come out.
+ * It loads index.html -- the inlined single-file page (no ES modules, so it
+ * runs fine from file:// and on GitHub Pages), picks a target through the real
+ * <select>, presses 生成答卷 and checks that the answer grid and the
+ * free/locked marking come out.
  */
 
 import { readFileSync } from 'node:fs';
@@ -26,7 +26,7 @@ const check = (ok, label, extra = '') => {
   console.log(`${ok ? 'ok  ' : 'FAIL'}  ${label}${extra ? '  ' + extra : ''}`);
 };
 
-const html = readFileSync(new URL('./mmpi2-gui.html', import.meta.url), 'utf8');
+const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 const dom = new JSDOM(html, { runScripts: 'dangerously', pretendToBeVisual: true });
 const { window } = dom;
 const document = window.document;

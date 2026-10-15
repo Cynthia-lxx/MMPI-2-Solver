@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MMPI-2 反算器</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --line: #e3e6ea;
+    --ink: #1c2330;
+    --muted: #6b7481;
+    --accent: #2f6feb;
+    --ok: #157f4a;
+    --ok-bg: #e8f6ee;
+    --bad: #b3261e;
+    --bad-bg: #fdecea;
+    --free: #7a5cc4;
+    --warn: #b26a00;
+    /* 派生面：输入框、单元格、代码块等，深浅色各自覆盖 */
+    --input-bg: #ffffff;
+    --cell-bg: #fbfbfc;
+    --code-bg: #eef1f5;
+    --targeted-bg: #f4f8ff;
+    --free-bg: #fbfaff;
+    --free-hover: #f1ecfb;
+    --slack-bg: #f3f7ff;
+    --slack-hover: #e6effd;
+    --chip-bg: #f1ecfb;
+    --th-bg: #f7f8fa;
+    --q-ink: #3c4450;
+    --busy-bg: #e8eefc;
+  }
+  /* 深色模式：由 <html data-theme="dark"> 驱动，首次访问跟随系统偏好 */
+  :root[data-theme="dark"] {
+    --bg: #0f1320;
+    --panel: #1a2030;
+    --line: #2a3346;
+    --ink: #e6e9f0;
+    --muted: #98a2b3;
+    --accent: #5b8bff;
+    --ok: #4cc38a;
+    --ok-bg: #142a20;
+    --bad: #ff6b61;
+    --bad-bg: #2e1816;
+    --free: #b79cf0;
+    --warn: #e0a64b;
+    --input-bg: #111726;
+    --cell-bg: #161d2c;
+    --code-bg: #1c2333;
+    --targeted-bg: #16223a;
+    --free-bg: #1a1530;
+    --free-hover: #241a3f;
+    --slack-bg: #14233f;
+    --slack-hover: #1b2f54;
+    --chip-bg: #241a3f;
+    --th-bg: #161d2c;
+    --q-ink: #c3c9d6;
+    --busy-bg: #16223a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.55 "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  header {
+    padding: 18px 24px 14px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 { margin: 0; font-size: 19px; font-weight: 650; }
+  header p { margin: 3px 0 0; color: var(--muted); font-size: 13px; }
+
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+    padding: 12px 24px; background: var(--panel);
+    border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5;
+  }
+  .toolbar label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; }
+  .toolbar select, .toolbar input, textarea {
+    font: inherit; color: var(--ink); background: var(--input-bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+  }
+  .spacer { flex: 1 1 auto; }
+  button {
+    font: inherit; padding: 6px 13px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--input-bg); color: var(--ink);
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover:not(:disabled) { color: #fff; filter: brightness(1.08); }
+
+  main {
+    display: grid; grid-template-columns: minmax(320px, 380px) 1fr;
+    gap: 18px; padding: 18px 24px 40px; align-items: start;
+  }
+  /* 平板及以下：单列堆叠（PC / 平板横屏仍走双列） */
+  @media (max-width: 1024px) { main { grid-template-columns: 1fr; } }
+
+  /* 大屏：限制内容宽度并加宽留白，避免超宽显示器上控件被拉散 */
+  @media (min-width: 1400px) {
+    main { max-width: 1480px; margin: 0 auto; gap: 24px; }
+    header, .toolbar { padding-left: 40px; padding-right: 40px; }
+  }
+
+  /* 手机 / 小屏：控件横滑、网格更密、表格收窄 */
+  @media (max-width: 640px) {
+    header { padding: 12px 14px 10px; }
+    header h1 { font-size: 17px; }
+    header p { font-size: 12px; }
+    .toolbar {
+      flex-wrap: nowrap; overflow-x: auto; gap: 10px;
+      padding: 10px 14px; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+    }
+    .toolbar::-webkit-scrollbar { display: none; }
+    .toolbar label, .toolbar .check { flex: 0 0 auto; white-space: nowrap; font-size: 12px; }
+    .toolbar .spacer { flex: 0 0 4px; }
+    main { padding: 12px 14px 32px; gap: 14px; }
+    .panel { padding: 12px 12px 16px; }
+    .grid { grid-template-columns: repeat(auto-fill, minmax(48px, 1fr)); gap: 3px; }
+    .grid.with-text { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+    .cell { min-height: 38px; }
+    .bank-wrap { max-height: 62vh; }
+    table { font-size: 12px; }
+  }
+
+  /* 横屏但高度很矮（手机横屏）：压缩头部与工具栏，题库面板降低高度 */
+  @media (orientation: landscape) and (max-height: 520px) {
+    header { padding-top: 8px; padding-bottom: 6px; }
+    .toolbar { padding-top: 6px; padding-bottom: 6px; }
+    .bank-wrap { max-height: 46vh; }
+  }
+
+  /* 主题切换按钮：幽灵样式，不抢视觉重心 */
+  button.ghost { background: transparent; }
+  button.ghost:hover:not(:disabled) { background: var(--code-bg); }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px 16px 18px;
+  }
+  .panel h2 { margin: 0 0 10px; font-size: 15px; font-weight: 650; }
+  .panel h3 { margin: 18px 0 8px; font-size: 14px; font-weight: 650; }
+  .panel h4 { margin: 12px 0 6px; font-size: 13px; font-weight: 650; color: var(--muted); }
+
+  #search { width: 100%; margin-bottom: 10px; }
+  .group { border-bottom: 1px solid var(--line); }
+  .group:last-child { border-bottom: 0; }
+  .group > summary {
+    cursor: pointer; padding: 7px 0; font-size: 13px; font-weight: 600; color: var(--muted);
+  }
+  .group > summary .count {
+    margin-left: 6px; font-weight: 400; font-size: 11px;
+    background: var(--code-bg); border-radius: 20px; padding: 1px 7px;
+  }
+  .rows { padding-bottom: 8px; }
+  .row {
+    display: grid; grid-template-columns: 52px 78px 1fr; gap: 8px;
+    align-items: center; padding: 2px 0;
+  }
+  /* 区间模式：一行两个下拉（下限 / 上限） */
+  .rows.two .row { grid-template-columns: 52px 66px 66px 1fr; }
+  .row select { width: 100%; }
+  .row .abbr { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .row select { font: inherit; border: 1px solid var(--line); border-radius: 5px; padding: 2px 4px; background: var(--input-bg); }
+  .row .full { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .bulk { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .bulk summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); }
+  .bulk textarea { width: 100%; margin: 8px 0 6px; font-family: ui-monospace, Consolas, monospace; }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .note, .status { font-size: 13px; }
+  .note { color: var(--muted); margin: 6px 0; }
+  .status { padding: 9px 12px; border-radius: 7px; background: var(--code-bg); margin-bottom: 12px; }
+  .status.ok { background: var(--ok-bg); color: var(--ok); }
+  .status.bad { background: var(--bad-bg); color: var(--bad); }
+  .status.busy { background: var(--busy-bg); color: var(--accent); }
+
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  th { color: var(--muted); font-weight: 600; }
+  td.full { color: var(--muted); }
+  tr.ok td { color: var(--ok); }
+  tr.bad td { color: var(--bad); }
+  tr.targeted { background: var(--targeted-bg); }
+  td.t { font-weight: 600; }
+  td.t.mid { color: var(--warn); }
+  td.t.hi { color: var(--bad); }
+
+  .chip {
+    margin-left: 8px; font-weight: 400; font-size: 12px; color: var(--free);
+    background: var(--chip-bg); border-radius: 20px; padding: 2px 10px;
+  }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(54px, 1fr));
+    gap: 4px; margin-top: 8px;
+  }
+  .cell {
+    border: 1px solid var(--line); border-radius: 5px; padding: 3px 4px;
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 11px; background: var(--cell-bg);
+    min-height: 30px;
+  }
+  .cell .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .cell b { font-size: 12px; }
+  .cell.is-t b { color: var(--accent); }
+  .cell.is-f b { color: var(--muted); }
+  .cell.locked { border-style: solid; opacity: .78; }
+  /* 区间目标下，翻转后目标仍全部落在区间内的题 */
+  .cell.slack { border-style: dashed; border-color: var(--accent); background: var(--slack-bg); cursor: pointer; }
+  .cell.slack:hover { background: var(--slack-hover); }
+  .chip.slack { color: var(--accent); background: var(--slack-hover); }
+  .cell.free { border-style: dashed; border-color: var(--free); cursor: pointer; background: var(--free-bg); }
+  .cell.free:hover { background: var(--free-hover); }
+  .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+  /* 导入 / 导出面板 */
+  .io { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+  .io summary { cursor: pointer; font-weight: 600; font-size: 13px; color: var(--accent); }
+  .io textarea { width: 100%; margin: 8px 0 6px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  .checks { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+  label.check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; }
+  .io .actions { gap: 6px; flex-wrap: wrap; }
+  .io .actions input[type=file] { font-size: 12px; max-width: 190px; }
+  td.raw, td.dim { color: var(--muted); font-variant-numeric: tabular-nums; }
+  /* 题干模式：一格一题，文字换行显示 */
+  .grid.with-text { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .grid.with-text .cell { flex-direction: column; align-items: stretch; gap: 2px; padding: 5px 7px; }
+  .cell .q { font-size: 11px; line-height: 1.45; color: var(--q-ink); }
+  td.dim { color: var(--muted); }
+  td.hot { color: #c0392b; font-weight: 600; }
+  /* 题库：567 题原文一览 */
+  .panel.wide { grid-column: 1 / -1; }
+  .bank-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }
+  .bank-controls input[type=search] { flex: 1 1 240px; min-width: 170px; }
+  .bank-controls .hint { margin: 0; }
+  .bank-wrap { max-height: 480px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+  .bank-wrap table { font-size: 12.5px; }
+  .bank-wrap thead th { position: sticky; top: 0; background: var(--th-bg); z-index: 1; }
+  .bank-wrap td.n { width: 52px; color: var(--muted); }
+  .bank-wrap td.orig { width: 38%; }
+  .bank-wrap td.zh { width: 30%; }
+  .bank-wrap td.ans, .bank-wrap td.st { width: 66px; text-align: center; }
+  .bank-wrap td.ans.is-t { color: var(--accent); font-weight: 600; }
+  .bank-wrap td.ans.is-f { color: var(--muted); }
+  .bank-wrap td.st.free { color: var(--free); }
+  .bank-wrap td.st.locked { color: var(--bad); }
+  .bank-wrap tr.locked td.orig { opacity: .78; }
+  .cell .q .en { display: block; color: var(--muted); font-size: 10.5px; }
+</style>
+<!-- 防闪烁：在首屏绘制前定下主题，默认跟随系统偏好 -->
+<script>
+  (function () {
+    try {
+      var t = localStorage.getItem('mmpi-theme');
+      if (t !== 'light' && t !== 'dark') {
+        t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.documentElement.setAttribute('data-theme', t);
+    } catch (e) {
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+  })();
+</script>
+</head>
+<body>
+<header>
+  <h1>MMPI-2 反算器</h1>
+  <p>指定预期 T 分，反求出满足该剖面的 567 题答卷，并标出哪些题目的回答是被锁定的、哪些可以自由组合。</p>
+</header>
+
+<div class="toolbar">
+  <label>性别
+    <select id="gender"><option value="male">男</option><option value="female">女</option></select>
+  </label>
+  <label>VRIN / TRIN
+    <select id="vrin-mode">
+      <option value="legacy">原程序公式</option>
+      <option value="fixed">修正公式</option>
+    </select>
+  </label>
+  <label>预期值模式
+    <select id="target-mode"></select>
+  </label>
+  <label>求解强度
+    <select id="strength">
+      <option value="quick">快速</option>
+      <option value="standard" selected>标准</option>
+      <option value="deep">深度</option>
+    </select>
+  </label>
+  <label class="check"><input id="show-text" type="checkbox"> 显示题干</label>
+  <label>题干语言
+    <select id="text-lang">
+      <option value="zh">中文</option>
+      <option value="en">英文原文</option>
+      <option value="both" selected>中英对照</option>
+    </select>
+  </label>
+  <span class="spacer"></span>
+  <button id="theme-toggle" class="ghost" type="button">🌙 深色</button>
+  <button id="example">载入示例</button>
+  <button id="clear">清空</button>
+</div>
+
+<main>
+  <section class="panel">
+    <h2>目标 T 分</h2>
+    <input id="search" type="search" placeholder="搜索量表（如 Sc、Bizarre）">
+    <div id="scale-list"></div>
+    <p class="hint" id="mode-hint">精确值：Hs 必须正好等于该 T 分。区间 / 不低于 / 不高于 会把目标放宽成一个取值范围，
+      求解器在区间内自行取值，满足条件的答卷因此更多。</p>
+    <details class="bulk">
+      <summary>批量输入</summary>
+      <textarea id="bulk" rows="5" placeholder="每行一个：Hs=70、Sc 81、Pt:74、Hs=65-75、Sc>=80、Pt<=60"></textarea>
+      <button id="bulk-apply">应用</button>
+    </details>
+
+    <details class="io">
+      <summary>导入答卷并评分</summary>
+      <textarea id="import-text" rows="4"
+        placeholder="粘贴 567 个字符的 T/F 串，或每行一个答案（T / F、True / False、是 / 否），也可每行「题号,答案」"></textarea>
+      <div class="actions">
+        <input id="import-file" type="file" accept=".txt,.csv,.tsv">
+        <button id="import-score">评分</button>
+        <button id="import-target">用作求解目标</button>
+      </div>
+      <p id="import-note" class="hint"></p>
+      <p class="hint">评分只算剖面，不求解。未作答的题会随机填充（会告诉你填了哪些）。
+        「用作求解目标」把读入剖面的 13 个基本量表设为目标，便于反推等价答卷。</p>
+    </details>
+
+    <details class="io" open>
+      <summary>导出表格</summary>
+      <div id="export-contents" class="checks"></div>
+      <div class="actions">
+        <label>格式
+          <select id="export-format"></select>
+        </label>
+        <button id="export-run-panel">导出</button>
+      </div>
+      <label class="check"><input id="export-english" type="checkbox" checked> 含英文题干</label>
+      <p class="hint">xlsx 会把勾选的内容各放一张表；其余格式按顺序拼接。
+        空白答题模板不需要先求解，可以直接拿去给人作答。</p>
+    </details>
+  </section>
+
+  <section class="panel">
+    <h2>答卷</h2>
+    <div class="actions">
+      <button id="solve" class="primary" disabled>生成答卷</button>
+      <button id="again" disabled>换一组</button>
+      <button id="shuffle" disabled>随机化自由题</button>
+      <button id="copy" disabled>复制 T/F</button>
+      <button id="csv" disabled>导出 CSV</button>
+    </div>
+    <p id="note" class="note"></p>
+    <div id="status" class="status">请在左侧指定至少一个量表的目标 T 分。</div>
+
+    <div id="results" hidden>
+      <h3>目标达成</h3>
+      <table id="target-table"></table>
+
+      <details>
+        <summary>完整剖面（87 个量表，橙色 ≥ 65、红色 ≥ 80）</summary>
+        <div id="profile"></div>
+      </details>
+
+      <h3>567 题回答<span id="free-count" class="chip"></span></h3>
+      <p class="hint">紫色虚线框为「自由题」：翻转它不会改变任何目标量表的分数，点击即可切换；
+        蓝色虚线框为「区间内可翻转」——它会改动目标量表，但翻过去后目标仍落在区间内，只能一道一道改；
+        实线框为锁定题，翻转会破坏目标（悬停可看它影响哪些量表）。</p>
+      <div id="answers" class="grid"></div>
+    </div>
+  </section>
+
+  <section class="panel wide">
+    <h2>题库（567 题原文）</h2>
+    <div class="bank-controls">
+      <input id="bank-search" type="search" placeholder="搜索题号或题干（中文 / 英文均可）">
+      <label>筛选
+        <select id="bank-filter">
+          <option value="all">全部</option>
+          <option value="free">只看自由题</option>
+          <option value="locked">只看锁定题</option>
+          <option value="t">只看作答「是」</option>
+          <option value="f">只看作答「否」</option>
+        </select>
+      </label>
+      <span class="spacer"></span>
+      <span id="bank-count" class="hint"></span>
+    </div>
+    <div class="bank-wrap">
+      <table id="bank-table"></table>
+    </div>
+    <p class="hint">英文为 MMPI-2 原题措辞，中文为通行译本。「回答 / 状态」两列在生成答卷后才有值；
+      未求解时它只是一份可检索的题库。</p>
+  </section>
+</main>
+
+<script type="module" src="./gui.js"></script>
+</body>
+</html>

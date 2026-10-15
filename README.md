@@ -27,7 +27,7 @@
 - **深色 / 浅色模式**：工具栏一键切换，首次访问跟随系统偏好（`prefers-color-scheme`），选择记在 localStorage；`<head>` 内联脚本在首屏绘制前定主题，避免闪烁。
 - **多端自适应**：PC / 平板横屏走双栏布局，≤1024px 自动单列堆叠；≤640px 工具栏横向滚动、答题网格更密、表格收窄；手机横屏（矮高度）压缩头部并降低题库面板高度。
 - **中国常模 T 分**（仅 29 个量表有公开参数，其余一律留空而不编造数字）、K 校正标注。
-- **离线单文件版**：`mmpi2-gui.html` 把全部脚本内联进一个 HTML，双击即可用，无需服务器（ES 模块在 `file://` 下会被浏览器拦，所以另备这一份）。
+- **自包含单文件**：`index.html` 是把全部脚本内联进一个 HTML 的产物，双击即可用，无需服务器、无需 `file://` 下的 ES 模块（构建脚本 `build-site.mjs` 由 `index.src.html` + 源码生成）。开发态的模块化源码是 `index.src.html`。
 
 ## 用法
 
@@ -43,19 +43,20 @@ python serve.py          # http://127.0.0.1:8137
 npx serve .              # 任意静态服务器都行
 ```
 
-> 直接双击 `index.html` 不行（ES 模块 + `file://`），请用 `serve.py` 或改用 `mmpi2-gui.html`。
+> `index.html` 是自包含单文件，直接双击也能打开（无需起服务器、不受 `file://` 的 ES 模块限制）。本地开发用 `serve.py` 起服务也一样。
 
 ## 目录
 
 | 文件 | 作用 |
 | --- | --- |
-| `index.html` | 页面骨架与样式，入口是 `<script type="module" src="./gui.js">` |
+| `index.html` | **构建产物**：内联了全部脚本的单文件页面，GitHub Pages 入口，双击可用 |
+| `index.src.html` | 开发态的模块化页面骨架（`<script type="module" src="./gui.js">`），`build-site.mjs` 的输入 |
 | `data.js` | 567 题题干（中/英）、87 量表定义与键控、常模表、中国常模参数 |
 | `inverse.js` | 求解内核：计分、可达值、目标审计、反算、VRIN/TRIN |
 | `xlsx.js` | 零依赖 XLSX 打包器（ZIP store + OOXML 最小实现） |
 | `sheet.js` | 四张导出表的构建 + 六种格式的序列化 |
 | `gui.js` | DOM 层：渲染、交互、导入导出面板（纯函数部分可在 Node 下测试） |
-| `mmpi2-gui.html` | 由上述脚本内联生成的单文件离线版 |
+| `build-site.mjs` | 把 `index.src.html` + 源码内联成单文件 `index.html`（`npm run build`） |
 | `test-*.mjs` | Node 测试 |
 | `serve.py` | 本地预览服务器（禁用缓存） |
 
