@@ -27,7 +27,14 @@ const check = (ok, label, extra = '') => {
 };
 
 const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
-const dom = new JSDOM(html, { runScripts: 'dangerously', pretendToBeVisual: true });
+const dom = new JSDOM(html, {
+  runScripts: 'dangerously',
+  pretendToBeVisual: true,
+  beforeParse(window) {
+    // 开启触屏环境，让 setupLongPressTips 真正挂上长按监听
+    window.ontouchstart = null;
+  },
+});
 const { window } = dom;
 const document = window.document;
 
@@ -218,6 +225,29 @@ $('search').value = '诈病';
 $('search').dispatchEvent(new window.Event('input'));
 const hitF = [...$('scale-list').querySelectorAll('.row')].filter((r) => !r.hidden);
 check(hitF.length === 1 && hitF[0].dataset.name === 'F', '按中文「诈病」搜索命中 F', hitF.map((r) => r.dataset.name).join(','));
+
+/* 触屏长按提示（替代悬停 title） -------------------------------------- */
+{
+  const cell = $('answers').querySelector('.cell');
+  const tip = document.querySelector('.tip');
+  check(!!cell && !!tip, '存在答题单元与长按提示气泡元素');
+  const touch = (type, x, y) => {
+    const e = new window.Event(type, { bubbles: true, cancelable: true });
+    e.touches = [{ clientX: x, clientY: y }];
+    return e;
+  };
+  // 短按不应弹出提示
+  cell.dispatchEvent(touch('touchstart', 10, 10));
+  cell.dispatchEvent(touch('touchend', 10, 10));
+  check(tip.style.display !== 'block', '短按不弹提示');
+  // 长按（按住不动 ≥450ms）应弹出，且含题目解释
+  cell.dispatchEvent(touch('touchstart', 20, 20));
+  await wait(550);
+  check(tip.style.display === 'block' && /第 \d+ 题/.test(tip.textContent), '长按弹出题目解释', JSON.stringify(tip.textContent).slice(0, 30));
+  // 在别处再次触摸应收起
+  document.body.dispatchEvent(touch('touchstart', 5, 5));
+  check(tip.style.display !== 'block', '再次触摸收起提示');
+}
 
 console.log(`\n${failures === 0 ? 'ALL OK' : failures + ' FAILURES'}`);
 process.exit(failures === 0 ? 0 : 1);

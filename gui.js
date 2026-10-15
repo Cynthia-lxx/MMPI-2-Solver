@@ -1225,7 +1225,14 @@ function renderItemBank() {
   }
 }
 
+// 触屏长按弹出提示后，紧随的 click 要被吃掉，避免把「锁定题解释」误当成翻转
+let suppressClick = false;
+
 function onAnswerClick(event) {
+  if (suppressClick) {
+    suppressClick = false;
+    return;
+  }
   const cell = event.target.closest('.cell');
   if (!cell || !state.plan) return;
   const isFree = cell.classList.contains('free');
@@ -1249,6 +1256,86 @@ function onAnswerClick(event) {
     }).byName
   );
   renderItemBank();
+}
+
+/**
+ * Touch fallback for the hover-only `title` tooltips: a long press (≈450ms,
+ * finger held still) shows the title in a floating bubble.  Short taps still
+ * behave as clicks.  We also kill the native callout / text-selection that a
+ * long press would otherwise trigger on mobile, so the bubble is the only
+ * thing that appears.
+ */
+function setupLongPressTips() {
+  if (typeof document === 'undefined' || !('ontouchstart' in window)) return;
+  const tip = document.createElement('div');
+  tip.className = 'tip';
+  tip.setAttribute('role', 'tooltip');
+  document.body.appendChild(tip);
+
+  const LONG = 450;
+  const MOVE = 10;
+  let timer = null;
+  let target = null;
+  let x0 = 0;
+  let y0 = 0;
+  let pinned = false; // 长按抬起后气泡保持显示，直到下次触摸 / 滚动
+
+  const hide = () => { tip.style.display = 'none'; pinned = false; };
+  const clearTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
+
+  const show = (el) => {
+    const text = el.getAttribute('title');
+    if (!text) return;
+    tip.textContent = text;
+    tip.style.display = 'block';
+    tip.style.visibility = 'hidden';
+    const r = el.getBoundingClientRect();
+    const tw = tip.offsetWidth;
+    const th = tip.offsetHeight;
+    let left = r.left + r.width / 2 - tw / 2;
+    let top = r.top - th - 8;
+    if (top < 8) top = r.bottom + 8;
+    left = Math.max(8, Math.min(left, window.innerWidth - tw - 8));
+    top = Math.max(8, Math.min(top, window.innerHeight - th - 8));
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
+    tip.style.visibility = 'visible';
+  };
+
+  document.addEventListener('touchstart', (e) => {
+    if (pinned) hide(); // 上一次的提示先收起
+    const el = e.target.closest('[title]');
+    if (!el || el.closest('select, input, textarea, button, a')) return;
+    target = el;
+    x0 = e.touches[0].clientX;
+    y0 = e.touches[0].clientY;
+    clearTimer();
+    timer = setTimeout(() => {
+      timer = null;
+      pinned = true;
+      suppressClick = true;
+      show(el);
+      // 让紧随其后的 click 被忽略后，标记自动复位，避免吃掉下一次正常点击
+      setTimeout(() => { suppressClick = false; }, 350);
+    }, LONG);
+  }, { passive: true });
+
+  document.addEventListener('touchmove', (e) => {
+    if (!target) return;
+    const dx = e.touches[0].clientX - x0;
+    const dy = e.touches[0].clientY - y0;
+    if (Math.hypot(dx, dy) > MOVE) { clearTimer(); hide(); target = null; }
+  }, { passive: true });
+
+  const end = () => { clearTimer(); target = null; if (!pinned) hide(); };
+  document.addEventListener('touchend', end, { passive: true });
+  document.addEventListener('touchcancel', end, { passive: true });
+  // 滚动时收起，避免气泡悬在别处
+  document.addEventListener('scroll', hide, { passive: true });
+  // 阻止长按弹出的系统菜单 / 文本选择
+  document.addEventListener('contextmenu', (e) => {
+    if (e.target.closest('[title]')) e.preventDefault();
+  });
 }
 
 /* -- actions -------------------------------------------------------- */
@@ -1538,6 +1625,7 @@ export function init() {
   renderItemBank();
   wire();
   refreshSolveButton();
+  setupLongPressTips();
 }
 
 function camel(id) {

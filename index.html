@@ -169,6 +169,15 @@
   .row select { font: inherit; border: 1px solid var(--line); border-radius: 5px; padding: 2px 4px; background: var(--input-bg); }
   .row .full { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cn { color: var(--muted); font-weight: 400; font-size: 11px; margin-left: 4px; }
+  /* 触屏长按弹出的提示气泡（替代悬停 title） */
+  .tip {
+    position: fixed; z-index: 9999; max-width: min(86vw, 360px);
+    background: #1c2333; color: #f2f4f8; border: 1px solid #34405a;
+    border-radius: 8px; padding: 8px 10px; font-size: 12px; line-height: 1.5;
+    white-space: pre-line; box-shadow: 0 6px 18px rgba(0, 0, 0, .25);
+    pointer-events: none; display: none;
+  }
+  :root[data-theme="dark"] .tip { background: #f2f4f8; color: #1c2333; border-color: #c4ccd8; }
 
   .bulk { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
   .bulk summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); }
@@ -200,12 +209,16 @@
   .grid {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(54px, 1fr));
     gap: 4px; margin-top: 8px;
+    touch-action: manipulation;
   }
   .cell {
     border: 1px solid var(--line); border-radius: 5px; padding: 3px 4px;
     display: flex; justify-content: space-between; align-items: baseline;
     font-size: 11px; background: var(--cell-bg);
     min-height: 30px;
+    /* 触屏长按弹出提示，禁用原本的文本选择 / 系统菜单 / 双击缩放 */
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none; touch-action: manipulation;
   }
   .cell .n { color: var(--muted); font-variant-numeric: tabular-nums; }
   .cell b { font-size: 12px; }
@@ -3003,7 +3016,14 @@ function renderItemBank() {
   }
 }
 
+// 触屏长按弹出提示后，紧随的 click 要被吃掉，避免把「锁定题解释」误当成翻转
+let suppressClick = false;
+
 function onAnswerClick(event) {
+  if (suppressClick) {
+    suppressClick = false;
+    return;
+  }
   const cell = event.target.closest('.cell');
   if (!cell || !state.plan) return;
   const isFree = cell.classList.contains('free');
@@ -3027,6 +3047,86 @@ function onAnswerClick(event) {
     }).byName
   );
   renderItemBank();
+}
+
+/**
+ * Touch fallback for the hover-only `title` tooltips: a long press (≈450ms,
+ * finger held still) shows the title in a floating bubble.  Short taps still
+ * behave as clicks.  We also kill the native callout / text-selection that a
+ * long press would otherwise trigger on mobile, so the bubble is the only
+ * thing that appears.
+ */
+function setupLongPressTips() {
+  if (typeof document === 'undefined' || !('ontouchstart' in window)) return;
+  const tip = document.createElement('div');
+  tip.className = 'tip';
+  tip.setAttribute('role', 'tooltip');
+  document.body.appendChild(tip);
+
+  const LONG = 450;
+  const MOVE = 10;
+  let timer = null;
+  let target = null;
+  let x0 = 0;
+  let y0 = 0;
+  let pinned = false; // 长按抬起后气泡保持显示，直到下次触摸 / 滚动
+
+  const hide = () => { tip.style.display = 'none'; pinned = false; };
+  const clearTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
+
+  const show = (el) => {
+    const text = el.getAttribute('title');
+    if (!text) return;
+    tip.textContent = text;
+    tip.style.display = 'block';
+    tip.style.visibility = 'hidden';
+    const r = el.getBoundingClientRect();
+    const tw = tip.offsetWidth;
+    const th = tip.offsetHeight;
+    let left = r.left + r.width / 2 - tw / 2;
+    let top = r.top - th - 8;
+    if (top < 8) top = r.bottom + 8;
+    left = Math.max(8, Math.min(left, window.innerWidth - tw - 8));
+    top = Math.max(8, Math.min(top, window.innerHeight - th - 8));
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
+    tip.style.visibility = 'visible';
+  };
+
+  document.addEventListener('touchstart', (e) => {
+    if (pinned) hide(); // 上一次的提示先收起
+    const el = e.target.closest('[title]');
+    if (!el || el.closest('select, input, textarea, button, a')) return;
+    target = el;
+    x0 = e.touches[0].clientX;
+    y0 = e.touches[0].clientY;
+    clearTimer();
+    timer = setTimeout(() => {
+      timer = null;
+      pinned = true;
+      suppressClick = true;
+      show(el);
+      // 让紧随其后的 click 被忽略后，标记自动复位，避免吃掉下一次正常点击
+      setTimeout(() => { suppressClick = false; }, 350);
+    }, LONG);
+  }, { passive: true });
+
+  document.addEventListener('touchmove', (e) => {
+    if (!target) return;
+    const dx = e.touches[0].clientX - x0;
+    const dy = e.touches[0].clientY - y0;
+    if (Math.hypot(dx, dy) > MOVE) { clearTimer(); hide(); target = null; }
+  }, { passive: true });
+
+  const end = () => { clearTimer(); target = null; if (!pinned) hide(); };
+  document.addEventListener('touchend', end, { passive: true });
+  document.addEventListener('touchcancel', end, { passive: true });
+  // 滚动时收起，避免气泡悬在别处
+  document.addEventListener('scroll', hide, { passive: true });
+  // 阻止长按弹出的系统菜单 / 文本选择
+  document.addEventListener('contextmenu', (e) => {
+    if (e.target.closest('[title]')) e.preventDefault();
+  });
 }
 
 /* -- actions -------------------------------------------------------- */
@@ -3316,6 +3416,7 @@ function init() {
   renderItemBank();
   wire();
   refreshSolveButton();
+  setupLongPressTips();
 }
 
 function camel(id) {
