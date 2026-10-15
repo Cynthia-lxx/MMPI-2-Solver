@@ -207,5 +207,17 @@ check(
 $('theme-toggle').click();
 check(document.documentElement.getAttribute('data-theme') === themeBefore, '再次点击回到原主题');
 
+/* 量表名双语 --------------------------------------------------------- */
+const lRow = $('scale-list').querySelector('.row[data-name="L"]');
+const fRow = $('scale-list').querySelector('.row[data-name="F"]');
+check(!!lRow && lRow.textContent.includes('说谎'), 'L 行显示中文「说谎」', JSON.stringify(lRow && lRow.textContent));
+check(!!fRow && fRow.textContent.includes('诈病'), 'F 行显示中文「诈病」', JSON.stringify(fRow && fRow.textContent));
+check(lRow.textContent.includes('Lie') && fRow.textContent.includes('Infrequency'), '英文原名仍保留');
+// 中文也能搜到
+$('search').value = '诈病';
+$('search').dispatchEvent(new window.Event('input'));
+const hitF = [...$('scale-list').querySelectorAll('.row')].filter((r) => !r.hidden);
+check(hitF.length === 1 && hitF[0].dataset.name === 'F', '按中文「诈病」搜索命中 F', hitF.map((r) => r.dataset.name).join(','));
+
 console.log(`\n${failures === 0 ? 'ALL OK' : failures + ' FAILURES'}`);
 process.exit(failures === 0 ? 0 : 1);

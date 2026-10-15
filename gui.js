@@ -46,6 +46,44 @@ export const FAMILY_LABELS = {
   supplemental: '补充量表（含 VRIN / TRIN）',
 };
 
+/** 量表中文名（标准 MMPI-2 中文版译名）。找不到时回退到纯英文。 */
+export const SCALE_CN = {
+  // 基本量表
+  L: '说谎', F: '诈病', K: '校正（防御）',
+  Hs: '疑病', D: '抑郁', Hy: '癔症', Pd: '精神病态偏倚', Mf: '男子气-女子气',
+  Pa: '偏执', Pt: '精神衰弱', Sc: '精神分裂', Ma: '轻躁狂', Si: '社会内向',
+  // Harris–Lingoes 亚量表
+  D1: '主观抑郁', D2: '精神运动迟缓', D3: '躯体机能障碍', D4: '精神迟钝', D5: '优柔寡断',
+  Hy1: '否认社会焦虑', Hy2: '情感需要', Hy3: '懒散不适', Hy4: '躯体主诉', Hy5: '抑制攻击',
+  Pd1: '家庭不和', Pd2: '权威冲突', Pd3: '社会超然', Pd4: '社会疏离', Pd5: '自我疏离',
+  Pa1: '被迫害观念', Pa2: '愤懑尖锐', Pa3: '天真',
+  Sc1: '社会疏离', Sc2: '情感疏离', Sc3: '自我掌控缺失（认知）',
+  Sc4: '自我掌控缺失（意动）', Sc5: '自我掌控缺失（抑制缺陷）', Sc6: '奇异感官体验',
+  Ma1: '非道德', Ma2: '精神运动加速', Ma3: '超然', Ma4: '自我膨胀',
+  // Wiener–Harmon 亚量表（显性 / 隐性）
+  'D-O': '依赖（显性）', 'D-S': '依赖（隐性）',
+  'Hy-O': '癔症（显性）', 'Hy-S': '癔症（隐性）',
+  'Pd-O': '病态人格（显性）', 'Pd-S': '病态人格（隐性）',
+  'Pa-O': '偏执（显性）', 'Pa-S': '偏执（隐性）',
+  'Ma-O': '轻躁狂（显性）', 'Ma-S': '轻躁狂（隐性）',
+  // Si 亚量表
+  Si1: '羞怯', Si2: '社交回避', Si3: '自我疏离',
+  // 补充量表
+  A: '焦虑', R: '压抑', Es: '自我强度', 'MAC-R': '麦克安德鲁酗酒（修订）', FB: 'F后',
+  VRIN: '变量应答不一致', TRIN: '同向应答不一致', 'O-H': '过度控制敌意', Do: '支配性',
+  Re: '社会责任', Mt: '大学适应不良', GM: '性别角色-男性化', GF: '性别角色-女性化',
+  PK: '创伤后应激（基恩）', PS: '创伤后应激（施伦格）', MDS: '婚姻困扰',
+  APS: '成瘾倾向', AAS: '成瘾承认',
+  ANX: '焦虑', FRS: '恐惧', OBS: '强迫', DEP: '抑郁', HEA: '健康关注', BIZ: '古怪思维',
+  ANG: '愤怒', CYN: '愤世嫉俗', ASP: '反社会行为', TPA: 'A型行为', LSE: '低自尊',
+  SOD: '社交不适', FAM: '家庭问题', WRK: '工作困扰', TRT: '负性治疗指标',
+};
+
+/** 量表中文名，没有对应项时返回空串。 */
+export function cnName(name) {
+  return SCALE_CN[name] || '';
+}
+
 export const FAMILY_ORDER = ['basic', 'harris_lingoes', 'wiener_harmon', 'si', 'supplemental'];
 
 export const ITERATION_PRESETS = { quick: 60000, standard: 200000, deep: 600000 };
@@ -732,11 +770,13 @@ function buildScaleList() {
             `${edge === 'lo' ? ' title="下限"' : edge === 'hi' ? ' title="上限"' : ''}>` +
             `<option value="">—</option>${values}</select>`;
         };
+        const cn = cnName(option.name);
         return (
-          `<div class="row" data-name="${option.name}" data-search="${option.name.toLowerCase()} ${option.fullName.toLowerCase()}">` +
-          `<span class="abbr">${option.name}</span>` +
+          `<div class="row" data-name="${option.name}"` +
+          ` data-search="${option.name.toLowerCase()} ${option.fullName.toLowerCase()} ${cn.toLowerCase()}">` +
+          `<span class="abbr" title="${option.fullName}${cn ? ' ' + cn : ''}">${option.name}</span>` +
           edges.map(picker).join('') +
-          `<span class="full">${option.fullName}</span></div>`
+          `<span class="full">${option.fullName}${cn ? ` <span class="cn">${cn}</span>` : ''}</span></div>`
         );
       })
       .join('');
@@ -1017,8 +1057,9 @@ function renderTargetTable(plan) {
         : gap < 0
           ? `低于下限 ${-gap} 分`
           : `高于上限 ${gap} 分`;
+      const cnScale = cnName(name);
       return (
-        `<tr class="${cls}"><td class="abbr">${name}</td><td>${want}</td>` +
+        `<tr class="${cls}"><td class="abbr" title="${byName.get(name).fullName}${cnScale ? ' ' + cnScale : ''}">${name}</td><td>${want}</td>` +
         `<td>${got}</td>${cnCell}` +
         `<td title="${gapTitle}">${gap === 0 ? '0' : (gap > 0 ? '+' : '') + gap}</td></tr>`
       );
@@ -1040,11 +1081,13 @@ function renderProfile(profile) {
         const value = profile[slot.name];
         const raw = raws[slot.name];
         const cn = cnT(slot.name, value, state.isMale);
+        const cnScale = cnName(slot.name);
         const targeted = state.targets[slot.name] !== undefined;
         const level = value >= 80 ? 'hi' : value >= 65 ? 'mid' : '';
         return (
           `<tr class="${targeted ? 'targeted' : ''}">` +
-          `<td class="abbr">${slot.name}</td><td class="full">${slot.fullName}</td>` +
+          `<td class="abbr" title="${slot.fullName}${cnScale ? ' ' + cnScale : ''}">${slot.name}</td>` +
+          `<td class="full">${slot.fullName}${cnScale ? ` <span class="cn">${cnScale}</span>` : ''}</td>` +
           `<td class="raw">${raw === undefined ? '' : raw}</td>` +
           `<td class="t ${level}">${value}</td>` +
           `<td class="dim">${cn === null ? '—' : cn}</td>` +
