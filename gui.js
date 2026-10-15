@@ -35,6 +35,16 @@ import {
   EXPORT_FORMATS,
 } from './sheet.js';
 import { itemFormatDesc } from './formats.js';
+import {
+  SCL90_DATA,
+  scl90Score,
+  scl90Solve,
+  scl90ItemText,
+  scl90TargetScales,
+  scl90ParseAnswers,
+  scl90ExportCsv,
+  levelToScore,
+} from './scl90.js';
 
 export { MMPI2_DATA };
 export { itemText, cnT, usTForCn60, buildSheets, serialize, parseAnswers, EXPORT_CONTENTS, EXPORT_FORMATS };
@@ -602,6 +612,7 @@ export function formatTarget(spec, option = null) {
  * ------------------------------------------------------------------ */
 
 const state = {
+  scale: 'mmpi2', // 'mmpi2' | 'scl90'
   isMale: true,
   correctInconsistency: false,
   iterations: ITERATION_PRESETS.standard,
@@ -615,6 +626,12 @@ const state = {
   freedom: null,
   slack: null,
 };
+
+/** 当前激活量表的数据对象（MMPI-2 / SCL-90 共用）。 */
+function currentData() {
+  return state.scale === 'scl90' ? SCL90_DATA : MMPI2_DATA;
+}
+const isScl90 = () => state.scale === 'scl90';
 
 let dom = {};
 
@@ -751,6 +768,7 @@ function modeEdges(mode) {
 }
 
 function buildScaleList() {
+  if (isScl90()) return buildScl90ScaleList();
   const byFamily = new Map(FAMILY_ORDER.map((f) => [f, []]));
   for (const option of optionsFor(state.isMale, state.correctInconsistency)) {
     byFamily.get(option.family).push(option);
@@ -965,6 +983,10 @@ function runPlan({ newSeed = false } = {}) {
     setNote('请先在左侧选择至少一个量表的目标 T 分。');
     return;
   }
+  if (isScl90()) {
+    runScl90Plan(targets);
+    return;
+  }
   if (newSeed) state.seed = (state.seed * 1103515245 + 12345) % 2147483647;
 
   dom.status.textContent = '计算中…';
@@ -1122,6 +1144,7 @@ function questionHtml(text, lang) {
  */
 function refreshFreedom() {
   if (!state.plan) return;
+  if (isScl90()) return; // SCL-90 无锁定概念，全部自由
   const analysis = analyseFreedom(state.answers, state.plan.bounds, {
     isMale: state.isMale,
     correctInconsistency: state.correctInconsistency,
@@ -1140,22 +1163,27 @@ function renderAnswers(plan) {
   const parts = [];
   const showText = dom.showText ? dom.showText.checked : false;
   const lang = dom.textLang ? dom.textLang.value : 'zh';
-  for (let item = 1; item <= MMPI2_DATA.nItems; item += 1) {
+  for (let item = 1; item <= currentData().nItems; item += 1) {
     const free = state.freedom[item];
     const slacky = !free && !!state.slack && state.slack[item];
     const answer = state.answers[item - 1] ? 'T' : 'F';
-    const text = itemText(item);
-    const reasons = plan.lockReason.get(item);
-    const title = [
-      `第 ${item} 题：` + (free
-        ? '自由（翻转不影响目标量表）'
-        : slacky
-          ? `区间内可翻转（翻转后目标仍全部落在区间内；会改动 ${(reasons || []).join('、')}）`
-          : `锁定（翻转会改变 ${(reasons || []).join('、')}）`),
-      text.zh,
-      text.en,
-    ].join('\n');
-    const desc = itemFormatDesc(MMPI2_DATA, item);
+    const text = isScl90() ? scl90ItemText(item) : itemText(item);
+    let title;
+    if (isScl90()) {
+      title = [text.zh, text.en].filter(Boolean).join('\n');
+    } else {
+      const reasons = plan.lockReason.get(item);
+      title = [
+        `第 ${item} 题：` + (free
+          ? '自由（翻转不影响目标量表）'
+          : slacky
+            ? `区间内可翻转（翻转后目标仍全部落在区间内；会改动 ${(reasons || []).join('、')}）`
+            : `锁定（翻转会改变 ${(reasons || []).join('、')}）`),
+        text.zh,
+        text.en,
+      ].join('\n');
+    }
+    const desc = itemFormatDesc(currentData(), item);
     if (desc.type === 'binary') {
       // TF：保持原结构（测试依赖 .cell > b 与 data-item）
       parts.push(
@@ -1197,7 +1225,7 @@ function renderAnswers(plan) {
  */
 function renderItemBank() {
   if (!dom.bankTable) return;
-  const total = MMPI2_DATA.nItems;
+  const total = isScl90() ? SCL90_DATA.nItems : MMPI2_DATA.nItems;
   const filter = dom.bankFilter ? dom.bankFilter.value : 'all';
   const plan = state.plan;
 
@@ -1212,13 +1240,15 @@ function renderItemBank() {
   const rows = [];
   let shown = 0;
   for (let item = 1; item <= total; item += 1) {
-    const text = itemText(item);
+    const text = isScl90() ? scl90ItemText(item) : itemText(item);
     if (needle &&
         String(item) !== needle &&
-        !text.en.toLowerCase().includes(needle) &&
+        !(text.en || '').toLowerCase().includes(needle) &&
         !text.zh.toLowerCase().includes(needle)) continue;
-    const answer = state.answers ? (state.answers[item - 1] ? 'T' : 'F') : null;
-    const free = plan ? !!state.freedom[item] : null;
+    const answer = state.answers
+      ? (isScl90() ? levelToScore(state.answers[item - 1]) : (state.answers[item - 1] ? 'T' : 'F'))
+      : null;
+    const free = plan ? (isScl90() ? true : !!state.freedom[item]) : null;
     if (filter === 'free' && !free) continue;
     if (filter === 'locked' && free !== false) continue;
     if (filter === 't' && answer !== 'T') continue;
@@ -1229,7 +1259,7 @@ function renderItemBank() {
       `<td class="n">${item}</td>` +
       `<td class="orig">${escapeHtml(text.en)}</td>` +
       `<td class="zh">${escapeHtml(text.zh)}</td>` +
-      `<td class="ans ${answer === null ? 'dim' : answer === 'T' ? 'is-t' : 'is-f'}">${answer || '—'}</td>` +
+      `<td class="ans ${answer === null ? 'dim' : answer === 'T' ? 'is-t' : isScl90() ? 'is-lvl' : 'is-f'}">${answer || '—'}</td>` +
       `<td class="st ${free === null ? 'dim' : free ? 'free' : 'locked'}">` +
       `${free === null ? '—' : free ? '自由' : '锁定'}</td>` +
       '</tr>'
@@ -1261,15 +1291,22 @@ function onAnswerClick(event) {
     const level = Number(lvlBtn.dataset.level);
     if (state.answers[item - 1] === level) return;
     state.answers[item - 1] = level;
-    refreshFreedom();
-    renderAnswers(state.plan);
-    renderProfile(scoreAnswers(state.answers, {
-      isMale: state.isMale,
-      correctInconsistency: state.correctInconsistency,
-    }).byName);
-    renderItemBank();
+    if (isScl90()) {
+      renderAnswers(state.plan);
+      renderScl90Profile(scl90Score(state.answers));
+      renderItemBank();
+    } else {
+      refreshFreedom();
+      renderAnswers(state.plan);
+      renderProfile(scoreAnswers(state.answers, {
+        isMale: state.isMale,
+        correctInconsistency: state.correctInconsistency,
+      }).byName);
+      renderItemBank();
+    }
     return;
   }
+  if (isScl90()) return; // 多级量表只认级别按钮
   const isFree = cell.classList.contains('free');
   const isSlack = cell.classList.contains('slack');
   if (!isFree && !isSlack) return;
@@ -1406,6 +1443,31 @@ function buildExportPanel() {
 }
 
 function runExport() {
+  if (isScl90()) {
+    if (!state.answers) {
+      setNote('请先生成或导入一份 SCL-90 答卷。');
+      return;
+    }
+    const scores = scl90Score(state.answers);
+    const lines = ['题号,得分,程度'];
+    for (let i = 0; i < SCL90_DATA.nItems; i += 1) {
+      const lvl = state.answers[i];
+      const sc = levelToScore(lvl);
+      const lab = SCL90_DATA.formats.likert5.levels[lvl]?.label || '';
+      lines.push(`${i + 1},${sc},${lab}`);
+    }
+    lines.push('', '因子,均分/总分,解释');
+    for (const f of SCL90_DATA.scales) {
+      const val = f.bind[0] === 0
+        ? f.type === 'sum' ? scores.total : scores.totalMean.toFixed(2)
+        : scores.factors[f.name].mean.toFixed(2);
+      const sev = scores.diagnoses[f.name] ? scores.diagnoses[f.name].severity : '';
+      lines.push(`${f.name},${val},${sev}`);
+    }
+    download('scl90-export.csv', lines.join('\r\n'), 'text/csv;charset=utf-8');
+    setNote(`已导出 scl90-export.csv（90 题 + 12 维度剖面）。`);
+    return;
+  }
   const picked = [...dom.exportContents.querySelectorAll('input[data-content]')]
     .filter((input) => input.checked)
     .map((input) => input.dataset.content);
@@ -1430,6 +1492,51 @@ function runExport() {
 
 /** Score answers pasted in from a real protocol, without solving anything. */
 function runImport() {
+  if (isScl90()) {
+    const parsed = scl90ParseAnswers(dom.importText.value);
+    if (parsed.found === 0) {
+      setNote('没读到答案：支持 90 位 1–5 得分串，或每行「题号,得分」。');
+      return;
+    }
+    const answers = parsed.answers.map((a) => (a === null ? 0 : a));
+    const scores = scl90Score(answers);
+    const plan = {
+      scale: 'scl90',
+      answers,
+      scores,
+      profile: scores,
+      freedom: new Array(SCL90_DATA.nItems + 1).fill(true),
+      freeItems: [...Array(SCL90_DATA.nItems).keys()].map((i) => i + 1),
+      slack: new Array(SCL90_DATA.nItems + 1).fill(false),
+      slackItems: [],
+      lockedItems: [],
+      lockReason: new Map(),
+      target: {},
+      requested: {},
+      residual: {},
+      bounds: {},
+      isMale: true,
+      feasible: true,
+      hasRange: false,
+      achieved: {},
+      loss: 0,
+      rawByName: {},
+    };
+    state.plan = plan;
+    state.answers = answers;
+    state.freedom = plan.freedom;
+    state.slack = plan.slack;
+    dom.results.hidden = false;
+    renderScl90TargetTable(plan);
+    renderScl90Profile(plan);
+    renderAnswers(plan);
+    renderItemBank();
+    const notes = [`已读入 ${parsed.found} / ${SCL90_DATA.nItems} 题`];
+    if (parsed.unknown.length) notes.push(`${parsed.unknown.length} 题缺失，按「没有」计。`);
+    dom.importNote.textContent = notes.join('；');
+    setNote(notes.join('；'));
+    return;
+  }
   const parsed = parseAnswers(dom.importText.value);
   if (parsed.found === 0) {
     setNote('没读到答案：支持 567 字符的 T/F 串，或每行一个 T/F、True/False、是/否。');
@@ -1476,6 +1583,11 @@ function invalidate(message) {
 }
 
 function wire() {
+  if (dom.scaleSwitch) {
+    dom.scaleSwitch.addEventListener('change', () => {
+      switchScale(dom.scaleSwitch.value);
+    });
+  }
   dom.gender.addEventListener('change', () => {
     state.isMale = dom.gender.value === 'male';
     state.targets = retarget(state.targets);
@@ -1552,6 +1664,16 @@ function wire() {
 
   dom.copy.addEventListener('click', async () => {
     if (!state.answers) return;
+    if (isScl90()) {
+      const text = state.answers.map((l) => String(levelToScore(l))).join('');
+      try {
+        await navigator.clipboard.writeText(text);
+        setNote(`已复制 ${text.length} 位得分串（1–5）到剪贴板。`);
+      } catch {
+        setNote('复制失败，请手动选择：' + text.slice(0, 80) + '…');
+      }
+      return;
+    }
     const text = answersToCompact(state.answers);
     try {
       await navigator.clipboard.writeText(text);
@@ -1563,6 +1685,17 @@ function wire() {
 
   dom.csv.addEventListener('click', () => {
     if (!state.answers) return;
+    if (isScl90()) {
+      const lines = ['题号,得分,程度'];
+      for (let i = 0; i < SCL90_DATA.nItems; i += 1) {
+        const lvl = state.answers[i];
+        const sc = levelToScore(lvl);
+        const lab = SCL90_DATA.formats.likert5.levels[lvl]?.label || '';
+        lines.push(`${i + 1},${sc},${lab}`);
+      }
+      download('scl90-answers.csv', lines.join('\r\n'), 'text/csv;charset=utf-8');
+      return;
+    }
     download('mmpi2-answers.csv', answersToCsv(state.answers, { isMale: state.isMale }), 'text/csv;charset=utf-8');
   });
 
@@ -1632,9 +1765,162 @@ function wire() {
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * SCL-90 量表（state.scale === 'scl90'）
+ * ------------------------------------------------------------------ */
+
+function buildScl90ScaleList() {
+  const scales = scl90TargetScales();
+  const html = scales
+    .map((s) => {
+      const options = s.presets
+        .map((p) => `<option value="${p.mean}">${p.label}（均分≈${p.mean}）</option>`)
+        .join('');
+      const current = state.targets[s.name];
+      const sel = current ? String(current.lo) : '';
+      return (
+        `<div class="row" data-name="${s.name}" data-search="${s.name.toLowerCase()}">` +
+        `<span class="abbr" title="${s.fullName}">${s.name}</span>` +
+        `<select data-name="${s.name}" data-edge="point">` +
+        `<option value="">—</option>${options}</select>` +
+        `<span class="full">${s.fullName}</span></div>`
+      );
+    })
+    .join('');
+  dom.scaleList.innerHTML = `<div class="rows">${html}</div>`;
+  for (const select of dom.scaleList.querySelectorAll('select')) {
+    select.value = '';
+    select.addEventListener('change', onTargetChanged);
+  }
+  applySearch();
+}
+
+function runScl90Plan(targets) {
+  const means = {};
+  for (const [name, spec] of Object.entries(targets)) means[name] = spec.lo;
+  const r = scl90Solve(means);
+  const scores = scl90Score(r.answers);
+  const n = SCL90_DATA.nItems;
+  const freedom = new Array(n + 1).fill(true);
+  const freeItems = [];
+  for (let i = 1; i <= n; i += 1) freeItems.push(i);
+  const bounds = {};
+  for (const [name, m] of Object.entries(means)) bounds[name] = { lo: m, hi: m };
+  const plan = {
+    scale: 'scl90',
+    answers: r.answers.slice(),
+    achieved: r.achieved,
+    target: { ...means },
+    requested: { ...means },
+    residual: {},
+    loss: 0,
+    feasible: true,
+    hasRange: false,
+    freedom,
+    freeItems,
+    slack: new Array(n + 1).fill(false),
+    slackItems: [],
+    lockedItems: [],
+    lockReason: new Map(),
+    profile: scores,
+    rawByName: {},
+    isMale: true,
+    bounds,
+    scores,
+  };
+  state.plan = plan;
+  state.answers = r.answers.slice();
+  state.freedom = freedom;
+  state.slack = plan.slack;
+  renderStatusScl90(plan);
+  renderScl90TargetTable(plan);
+  renderScl90Profile(plan);
+  renderAnswers(plan);
+  renderItemBank();
+  dom.results.hidden = false;
+  refreshSolveButton();
+}
+
+function renderStatusScl90(plan) {
+  const n = Object.keys(plan.target).length;
+  dom.status.textContent = `已生成答卷：命中 ${n} 个因子目标（精确求解，耗时 0 ms）。`;
+  dom.status.className = 'status ok';
+}
+
+function renderScl90TargetTable(plan) {
+  const rows = Object.keys(plan.target)
+    .map((name) => {
+      const t = plan.target[name];
+      const f = plan.scores.factors[name];
+      const got = f ? f.mean : name === '总分' ? plan.scores.total : plan.scores.totalMean;
+      const band = plan.scores.diagnoses[name];
+      const sev = band ? band.severity : '';
+      const hot = band && band.severity !== '正常' ? 'hot' : '';
+      return (
+        `<tr class="ok"><td class="abbr">${name}</td>` +
+        `<td>${Number(t).toFixed(1)}</td><td>${Number(got).toFixed(2)}</td>` +
+        `<td class="${hot}">${sev}</td></tr>`
+      );
+    })
+    .join('');
+  dom.targetTable.innerHTML =
+    `<thead><tr><th>因子</th><th>目标均分</th><th>达成均分</th><th>解释</th></tr></thead><tbody>${rows}</tbody>`;
+}
+
+function renderScl90Profile(input) {
+  const s = input.scores || input;
+  const rows = SCL90_DATA.scales
+    .map((f) => {
+      const val = f.bind[0] === 0
+        ? f.type === 'sum' ? s.total : s.totalMean.toFixed(2)
+        : s.factors[f.name].mean.toFixed(2);
+      const band = s.diagnoses[f.name];
+      const sev = band ? band.severity : '';
+      const hot = band && band.severity !== '正常' ? 'hot' : '';
+      return `<tr class="${hot}"><td class="abbr">${f.name}</td><td>${val}</td><td>${sev}</td></tr>`;
+    })
+    .join('');
+  const summary =
+    `总分 ${s.total} · 总平均分 ${s.totalMean.toFixed(2)} · 阳性项目 ${s.positiveCount}/${SCL90_DATA.nItems}` +
+    (s.positiveCount >= SCL90_DATA.positiveCutoff ? `（≥${SCL90_DATA.positiveCutoff}，可疑）` : '');
+  dom.profile.innerHTML =
+    `<p class="hint">${summary}</p>` +
+    `<table><thead><tr><th>因子</th><th>均分/总分</th><th>解释</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function switchScale(value) {
+  state.scale = value;
+  state.targets = {};
+  document.body.setAttribute('data-scale', value);
+  const h1 = document.querySelector('header h1');
+  const hp = document.querySelector('header p');
+  const panel = dom.scaleList.closest('.panel');
+  const leftH2 = panel ? panel.querySelector('h2') : null;
+  const hTarget = document.getElementById('h-target');
+  const hAnswers = document.getElementById('h-answers');
+  if (isScl90()) {
+    if (h1) h1.textContent = 'SCL-90 自评量表';
+    if (hp) hp.textContent = '选择各因子的目标严重度，反推出一份 90 题作答；或直接导入、编辑并评分。';
+    if (leftH2) leftH2.textContent = '目标因子均分';
+    if (hTarget) hTarget.textContent = '因子均分达成';
+    if (hAnswers) hAnswers.textContent = '90 题回答';
+    if (dom.copy) dom.copy.textContent = '复制得分串';
+    setNote('已切换到 SCL-90。选定因子严重度后点「生成答卷」。');
+  } else {
+    if (h1) h1.textContent = 'MMPI-2 反算器';
+    if (hp) hp.textContent = '指定预期 T 分，反求出满足该剖面的 567 题答卷，并标出哪些题目的回答是被锁定的、哪些可以自由组合。';
+    if (leftH2) leftH2.textContent = '目标 T 分';
+    if (hTarget) hTarget.textContent = '目标达成';
+    if (hAnswers) hAnswers.textContent = '567 题回答';
+    if (dom.copy) dom.copy.textContent = '复制 T/F';
+  }
+  buildScaleList();
+  invalidate('已切换量表，请重新选择目标。');
+}
+
 export function init() {
   const ids = [
-    'gender', 'vrin-mode', 'strength', 'note', 'search', 'scale-list', 'bulk', 'bulk-apply',
+    'scale-switch', 'gender', 'vrin-mode', 'strength', 'note', 'search', 'scale-list', 'bulk', 'bulk-apply',
     'example', 'clear', 'solve', 'again', 'shuffle', 'copy', 'csv', 'status', 'results',
     'target-table', 'profile', 'answers', 'free-count', 'show-text',
     'export-contents', 'export-format', 'export-english', 'export-run-panel',
@@ -1654,6 +1940,13 @@ export function init() {
   }
   dom.note.hidden = true;
   dom.results.hidden = true;
+  if (dom.scaleSwitch) {
+    dom.scaleSwitch.innerHTML =
+      '<option value="mmpi2">MMPI-2 明尼苏达多项人格测验</option>' +
+      '<option value="scl90">SCL-90 症状自评量表</option>';
+    dom.scaleSwitch.value = state.scale;
+    document.body.setAttribute('data-scale', state.scale);
+  }
   buildScaleList();
   buildExportPanel();
   renderItemBank();

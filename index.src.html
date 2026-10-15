@@ -274,6 +274,15 @@
   .bank-wrap td.st.locked { color: var(--bad); }
   .bank-wrap tr.locked td.orig { opacity: .78; }
   .cell .q .en { display: block; color: var(--muted); font-size: 10.5px; }
+  /* 切换到 SCL-90 时隐藏 MMPI-2 专属控件 */
+  body[data-scale="scl90"] .mmpi2-only { display: none !important; }
+  .bank-wrap td.ans.is-lvl { color: var(--accent); font-weight: 600; }
+  #profile table, #target-table table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  #profile th, #profile td, #target-table th, #target-table td {
+    padding: 4px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top;
+  }
+  #profile td.hot, #target-table td.hot { color: #c0392b; font-weight: 600; }
+  .cell.multi .lvl { min-width: 26px; }
 </style>
 <!-- 防闪烁：在首屏绘制前定下主题，默认跟随系统偏好 -->
 <script>
@@ -297,19 +306,22 @@
 </header>
 
 <div class="toolbar">
-  <label>性别
+  <label>量表
+    <select id="scale-switch"></select>
+  </label>
+  <label class="mmpi2-only">性别
     <select id="gender"><option value="male">男</option><option value="female">女</option></select>
   </label>
-  <label>VRIN / TRIN
+  <label class="mmpi2-only">VRIN / TRIN
     <select id="vrin-mode">
       <option value="legacy">原程序公式</option>
       <option value="fixed">修正公式</option>
     </select>
   </label>
-  <label>预期值模式
+  <label class="mmpi2-only">预期值模式
     <select id="target-mode"></select>
   </label>
-  <label>求解强度
+  <label class="mmpi2-only">求解强度
     <select id="strength">
       <option value="quick">快速</option>
       <option value="standard" selected>标准</option>
@@ -326,7 +338,7 @@
   </label>
   <span class="spacer"></span>
   <button id="theme-toggle" class="ghost" type="button">🌙 深色</button>
-  <button id="example">载入示例</button>
+  <button id="example" class="mmpi2-only">载入示例</button>
   <button id="clear">清空</button>
 </div>
 
@@ -335,9 +347,9 @@
     <h2>目标 T 分</h2>
     <input id="search" type="search" placeholder="搜索量表（如 Sc、Bizarre）">
     <div id="scale-list"></div>
-    <p class="hint" id="mode-hint">精确值：Hs 必须正好等于该 T 分。区间 / 不低于 / 不高于 会把目标放宽成一个取值范围，
+    <p class="hint mmpi2-only" id="mode-hint">精确值：Hs 必须正好等于该 T 分。区间 / 不低于 / 不高于 会把目标放宽成一个取值范围，
       求解器在区间内自行取值，满足条件的答卷因此更多。</p>
-    <details class="bulk">
+    <details class="bulk mmpi2-only">
       <summary>批量输入</summary>
       <textarea id="bulk" rows="5" placeholder="每行一个：Hs=70、Sc 81、Pt:74、Hs=65-75、Sc>=80、Pt<=60"></textarea>
       <button id="bulk-apply">应用</button>
@@ -350,7 +362,7 @@
       <div class="actions">
         <input id="import-file" type="file" accept=".txt,.csv,.tsv">
         <button id="import-score">评分</button>
-        <button id="import-target">用作求解目标</button>
+        <button id="import-target" class="mmpi2-only">用作求解目标</button>
       </div>
       <p id="import-note" class="hint"></p>
       <p class="hint">评分只算剖面，不求解。未作答的题会随机填充（会告诉你填了哪些）。
@@ -377,7 +389,7 @@
     <div class="actions">
       <button id="solve" class="primary" disabled>生成答卷</button>
       <button id="again" disabled>换一组</button>
-      <button id="shuffle" disabled>随机化自由题</button>
+      <button id="shuffle" class="mmpi2-only" disabled>随机化自由题</button>
       <button id="copy" disabled>复制 T/F</button>
       <button id="csv" disabled>导出 CSV</button>
     </div>
@@ -385,7 +397,7 @@
     <div id="status" class="status">请在左侧指定至少一个量表的目标 T 分。</div>
 
     <div id="results" hidden>
-      <h3>目标达成</h3>
+      <h3 id="h-target">目标达成</h3>
       <table id="target-table"></table>
 
       <details>
@@ -393,7 +405,7 @@
         <div id="profile"></div>
       </details>
 
-      <h3>567 题回答<span id="free-count" class="chip"></span></h3>
+      <h3 id="h-answers">567 题回答<span id="free-count" class="chip"></span></h3>
       <p class="hint">紫色虚线框为「自由题」：翻转它不会改变任何目标量表的分数，点击即可切换；
         蓝色虚线框为「区间内可翻转」——它会改动目标量表，但翻过去后目标仍落在区间内，只能一道一道改；
         实线框为锁定题，翻转会破坏目标（悬停可看它影响哪些量表）。</p>
