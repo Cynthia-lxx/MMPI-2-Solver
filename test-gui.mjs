@@ -14,15 +14,19 @@ import { MMPI2_DATA as DATA } from './data.js';
 import {
   planSheet,
   randomizeFree,
+  randomizeWithinBounds,
   answersToCsv,
   answersToCompact,
   parseBulkTargets,
   combinationLabel,
   reachableValuesFor,
   startSheet,
+  formatTarget,
+  convertTargets,
+  analyseFreedom,
   EXAMPLE_TARGETS,
 } from './gui.js';
-import { scoreAnswers, InverseModel, nearestReachable } from './inverse.js';
+import { scoreAnswers, InverseModel, nearestReachable, distanceOutside } from './inverse.js';
 
 let failures = 0;
 const check = (ok, label, extra = '') => {
@@ -250,6 +254,138 @@ for (const isMale of [true, false]) {
       `VRIN=${scored.VRIN} TRIN=${scored.TRIN}`
     );
   }
+}
+
+/* 10. range targets --------------------------------------------------- */
+{
+  // distanceOutside is the whole definition of "inside the range"
+  check(distanceOutside(70, { lo: 65, hi: 75 }) === 0, '区间内距离为 0');
+  check(distanceOutside(60, { lo: 65, hi: 75 }) === -5, '低于下限为负');
+  check(distanceOutside(80, { lo: 65, hi: 75 }) === 5, '高于上限为正');
+
+  const plan = planSheet({
+    targets: { Hs: { lo: 65, hi: 75 } },
+    isMale: true,
+    seed: 3,
+    iterations: 120000,
+  });
+  check(plan.feasible, '区间目标 Hs 65–75 可行', `loss=${plan.loss}`);
+  check(plan.achieved.Hs >= 65 && plan.achieved.Hs <= 75, '达成值落在区间内', `Hs=${plan.achieved.Hs}`);
+  check(plan.residual.Hs === 0, '区间内偏差为 0', `${plan.residual.Hs}`);
+  check(plan.hasRange, '标记为区间目标');
+  // 65 is not a value the male Hs table can produce, so the bound is snapped
+  // outwards -- the planned interval must still contain the requested one
+  const hsValues = reachableValuesFor('Hs', true, false);
+  check(
+    plan.bounds.Hs.lo <= 65 && plan.bounds.Hs.hi >= 75 &&
+      hsValues.includes(plan.bounds.Hs.lo) && hsValues.includes(plan.bounds.Hs.hi),
+    'bounds 是折算到可取値后的区间',
+    JSON.stringify(plan.bounds.Hs)
+  );
+
+  // a point target must behave exactly as before
+  const point = planSheet({ targets: { Hs: 70 }, isMale: true, seed: 3, iterations: 60000 });
+  check(point.achieved.Hs === 70 && point.target.Hs === 70, '定点目标不受影响', `${point.target.Hs}`);
+  check(point.slackItems.length === 0, '定点目标没有区间内可翻转题');
+
+  // >= and <= are the same interval with one open end
+  const atLeast = planSheet({
+    targets: { Hs: { lo: 78, hi: 120 } },
+    isMale: true,
+    seed: 5,
+    iterations: 60000,
+  });
+  check(atLeast.feasible && atLeast.achieved.Hs >= 78, '不低于 78 可行', `Hs=${atLeast.achieved.Hs}`);
+  const atMost = planSheet({
+    targets: { Hs: { lo: 0, hi: 55 } },
+    isMale: true,
+    seed: 5,
+    iterations: 60000,
+  });
+  check(atMost.feasible && atMost.achieved.Hs <= 55, '不高于 55 可行', `Hs=${atMost.achieved.Hs}`);
+}
+
+/* 11. slack items: flippable, but only one at a time ------------------- */
+{
+  const wide = planSheet({
+    targets: { Hs: { lo: 50, hi: 90 } },
+    isMale: true,
+    seed: 9,
+    iterations: 120000,
+  });
+  check(wide.feasible, '宽区间可行', `Hs=${wide.achieved.Hs}`);
+  check(wide.slackItems.length > 0, '宽区间找出区间内可翻转题', `${wide.slackItems.length} 道`);
+  check(
+    wide.slackItems.every((item) => !wide.freedom[item]),
+    '区间内可翻转题不属于结构自由题'
+  );
+
+  let broke = 0;
+  for (const item of wide.slackItems) {
+    const answers = wide.answers.slice();
+    answers[item - 1] = !answers[item - 1];
+    const after = scoreAnswers(answers, { isMale: true }).byName;
+    if (distanceOutside(after.Hs, wide.bounds.Hs) !== 0) broke += 1;
+  }
+  check(broke === 0, '每一道单独翻转后仍在区间内', `broke=${broke}`);
+
+  // flipping one changes where the rest sit, so the split has to be redone
+  const flipped = wide.answers.slice();
+  flipped[wide.slackItems[0] - 1] = !flipped[wide.slackItems[0] - 1];
+  const again = analyseFreedom(flipped, wide.bounds, { isMale: true });
+  check(
+    distanceOutside(scoreAnswers(flipped, { isMale: true }).byName.Hs, wide.bounds.Hs) === 0,
+    '重算前的翻转确实安全（正向复核）'
+  );
+  check(again.freedom.length === DATA.nItems + 1 && again.slack.length === DATA.nItems + 1,
+    '重算返回完整数组');
+
+  // randomising keeps the profile inside the interval
+  const shuffled = randomizeWithinBounds(wide.answers, wide.bounds, {
+    freeItems: wide.freeItems,
+    slackItems: wide.slackItems,
+    seed: 11,
+    isMale: true,
+  });
+  const after = scoreAnswers(shuffled, { isMale: true }).byName;
+  check(distanceOutside(after.Hs, wide.bounds.Hs) === 0, '随机化后仍在区间内', `Hs=${after.Hs}`);
+  const changed = shuffled.reduce((n, a, i) => n + (a !== wide.answers[i] ? 1 : 0), 0);
+  check(changed > 0, '随机化确实改了答卷', `${changed} 道`);
+}
+
+/* 12. the four modes in bulk input and in the formatter ---------------- */
+{
+  const male = DATA.reachable.male;
+  const bulk = parseBulkTargets('Hs=70\nSc=65-75\nPt>=80\nD<=45\nMa 55', { isMale: true });
+  check(bulk.targets.Hs === 70, '批量：精确值仍是数字');
+  check(bulk.targets.Sc.lo === 65 && bulk.targets.Sc.hi === 75, '批量：区间', JSON.stringify(bulk.targets.Sc));
+  check(
+    bulk.targets.Pt.lo === 80 && bulk.targets.Pt.hi === male.Pt.max,
+    '批量：不低于',
+    JSON.stringify(bulk.targets.Pt)
+  );
+  check(
+    bulk.targets.D.hi === 45 && bulk.targets.D.lo === male.D.min,
+    '批量：不高于',
+    JSON.stringify(bulk.targets.D)
+  );
+  check(bulk.targets.Ma === 55, '批量：空格分隔');
+
+  const hs = male.Hs;
+  check(formatTarget(70, hs) === '70', '格式化：精确值', formatTarget(70, hs));
+  check(formatTarget({ lo: 65, hi: 75 }, hs) === '65–75', '格式化：区间', formatTarget({ lo: 65, hi: 75 }, hs));
+  check(formatTarget({ lo: 65, hi: hs.max }, hs) === '≥ 65', '格式化：不低于', formatTarget({ lo: 65, hi: hs.max }, hs));
+  check(formatTarget({ lo: hs.min, hi: 70 }, hs) === '≤ 70', '格式化：不高于', formatTarget({ lo: hs.min, hi: 70 }, hs));
+
+  const options = [{ name: 'Hs', values: hs.values, min: hs.min, max: hs.max }];
+  const exact = convertTargets({ Hs: { lo: 65, hi: 75 } }, 'exact', options);
+  check(exact.Hs.lo === exact.Hs.hi, '切到精确值后是定点', JSON.stringify(exact.Hs));
+  const range = convertTargets({ Hs: { lo: 70, hi: 70 } }, 'range', options);
+  check(range.Hs.lo === 70 && range.Hs.hi > 70, '切到区间后上限抬高', JSON.stringify(range.Hs));
+  const atLeast = convertTargets({ Hs: { lo: 70, hi: 70 } }, 'atLeast', options);
+  check(atLeast.Hs.lo === 70 && atLeast.Hs.hi === hs.max, '切到不低于', JSON.stringify(atLeast.Hs));
+  const atMost = convertTargets({ Hs: { lo: 70, hi: 70 } }, 'atMost', options);
+  check(atMost.Hs.hi === 70 && atMost.Hs.lo === hs.min, '切到不高于', JSON.stringify(atMost.Hs));
 }
 
 console.log(`\n${failures === 0 ? 'ALL OK' : failures + ' FAILURES'}`);

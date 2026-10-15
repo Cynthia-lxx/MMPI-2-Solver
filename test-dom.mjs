@@ -165,5 +165,34 @@ $('gender').dispatchEvent(new window.Event('change'));
 check($('results').hidden, '切换性别后结果作废');
 check($('status').textContent.includes('性别'), '提示重新生成', JSON.stringify($('status').textContent));
 
+/* 预期值模式：区间 --------------------------------------------------- */
+$('clear').click();
+$('target-mode').value = 'range';
+$('target-mode').dispatchEvent(new window.Event('change'));
+const loSel = $('scale-list').querySelector('select[data-name="Hs"][data-edge="lo"]');
+const hiSel = $('scale-list').querySelector('select[data-name="Hs"][data-edge="hi"]');
+check(!!loSel && !!hiSel, '区间模式每行两个下拉（下限 / 上限）');
+loSel.value = loSel.options[8].value;
+loSel.dispatchEvent(new window.Event('change'));
+hiSel.value = hiSel.options[28].value;
+hiSel.dispatchEvent(new window.Event('change'));
+check(!$('solve').disabled, '区间模式下可求解');
+
+$('solve').click();
+await wait(4000);
+check($('status').className.includes('ok'), '区间目标可满足', JSON.stringify($('status').textContent));
+check($('status').textContent.includes('区间'), '状态说明落在区间内', JSON.stringify($('status').textContent));
+const wantCell = $('target-table').querySelector('tbody tr').children[1].textContent;
+check(/–|≥|≤/.test(wantCell), '目标列显示区间', JSON.stringify(wantCell));
+
+const slackCells = [...$('answers').querySelectorAll('.cell.slack')];
+check(slackCells.length > 0, '区间目标产生「区间内可翻转」题', `${slackCells.length} 道`);
+const slackItem = slackCells[0].dataset.item;
+const beforeSlack = slackCells[0].querySelector('b').textContent;
+slackCells[0].dispatchEvent(new window.Event('click', { bubbles: true }));
+const afterSlack = $('answers').querySelector(`.cell[data-item="${slackItem}"] b`).textContent;
+check(afterSlack !== beforeSlack, '点击区间内可翻转题可切换', `${beforeSlack} -> ${afterSlack}`);
+check($('free-count').textContent.includes('区间内'), '组合数提示含区间内可翻转题', JSON.stringify($('free-count').textContent));
+
 console.log(`\n${failures === 0 ? 'ALL OK' : failures + ' FAILURES'}`);
 process.exit(failures === 0 ? 0 : 1);

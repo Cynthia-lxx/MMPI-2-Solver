@@ -419,26 +419,88 @@ export function scaleOptions(options = {}) {
   }));
 }
 
-/** Is this T score reachable, and if not what is the nearest one that is? */
+/* ------------------------------------------------------------------ *
+ * target specs: a point value or a range
+ *
+ * A target is either a plain number (Hs = 70) or an interval {lo, hi}
+ * (Hs in 65..75).  "At least 65" is {lo: 65, hi: tableMax} and "at most 70"
+ * is {lo: tableMin, hi: 70}, so one solver covers every mode the GUI offers.
+ * A point target is simply the interval with lo === hi.
+ * ------------------------------------------------------------------ */
+
+/** number | {lo,hi} | {min,max} -> {lo, hi}. */
+export function normalizeTarget(spec) {
+  if (spec === null || spec === undefined) return null;
+  if (typeof spec === 'number') return { lo: spec, hi: spec };
+  const lo = spec.lo ?? spec.min;
+  const hi = spec.hi ?? spec.max;
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) {
+    throw new Error(`bad target ${JSON.stringify(spec)}`);
+  }
+  return lo <= hi ? { lo, hi } : { lo: hi, hi: lo };
+}
+
+export function isRangeTarget(spec) {
+  const t = normalizeTarget(spec);
+  return !!t && t.lo !== t.hi;
+}
+
+/**
+ * Signed distance from the interval: negative below the lower bound, positive
+ * above the upper bound, 0 anywhere inside (so 0 means "target satisfied").
+ */
+export function distanceOutside(value, spec) {
+  const t = normalizeTarget(spec);
+  if (!t) return 0;
+  if (value < t.lo) return value - t.lo;
+  if (value > t.hi) return value - t.hi;
+  return 0;
+}
+
+/** One number standing in for an interval (start sheets, midpoints). */
+export function targetPoint(spec, values = null) {
+  const t = normalizeTarget(spec);
+  if (!t) return null;
+  if (t.lo === t.hi) return t.lo;
+  const mid = (t.lo + t.hi) / 2;
+  return values && values.length ? nearestReachable(values, mid) : Math.round(mid);
+}
+
+/**
+ * Is this target reachable, and if not what is the nearest one that is?
+ * Accepts point targets and intervals; both bounds are audited separately.
+ */
 export function auditTargets(targets, options = {}) {
   const { isMale = true, data = MMPI2_DATA } = options;
   const reachable = reachableValues(isMale, data);
   const report = {};
-  for (const [name, want] of Object.entries(targets)) {
+  for (const [name, spec] of Object.entries(targets)) {
     const info = reachable[name];
     if (!info) throw new Error(`unknown scale ${name}`);
-    const inTable = info.values.includes(want);
+    const want = normalizeTarget(spec);
+    const lo = snapTo(info.values, want.lo);
+    const hi = snapTo(info.values, want.hi);
+    const inTable = info.values.includes(want.lo) && info.values.includes(want.hi);
     report[name] = {
-      want,
+      want: want.lo === want.hi ? want.lo : { lo: want.lo, hi: want.hi },
       inTable,
-      nearest: inTable ? want : nearestReachable(info.values, want),
-      nearestBelow: info.values.filter((v) => v < want).pop() ?? null,
-      nearestAbove: info.values.find((v) => v > want) ?? null,
+      // point targets keep their old meaning: `nearest` is the value to aim at
+      nearest: want.lo === want.hi ? lo : targetPoint(want, info.values),
+      nearestBelow: info.values.filter((v) => v < want.lo).pop() ?? null,
+      nearestAbove: info.values.find((v) => v > want.hi) ?? null,
       tableMin: info.min,
       tableMax: info.max,
+      lo,
+      hi,
+      loSnapped: lo !== want.lo,
+      hiSnapped: hi !== want.hi,
     };
   }
   return report;
+}
+
+function snapTo(values, value) {
+  return values.includes(value) ? value : nearestReachable(values, value);
 }
 
 /* ------------------------------------------------------------------ *
@@ -457,6 +519,11 @@ function itemsOfScale(model, flat) {
 
 /**
  * Find an answer sheet hitting `targets` ({scale name: T score}).
+ *
+ * A target is a number (Hs = 70) or an interval {lo, hi} (Hs in 65..75); see
+ * normalizeTarget().  Inside an interval the penalty is 0, so the search is
+ * free to pick whichever value in the range fits the rest of the profile --
+ * which is exactly why a range target has more solutions than a point target.
  *
  * Options: isMale, correctInconsistency, weights, tol, exponent, start,
  * iterations, seed, t0, t1, restrictCandidates, polish, snapToReachable.
@@ -481,28 +548,30 @@ export function solve(targets, options = {}) {
     data = MMPI2_DATA,
   } = options;
 
-  let wanted = { ...targets };
+  const wanted = {};
+  for (const [name, spec] of Object.entries(targets)) wanted[name] = normalizeTarget(spec);
   if (snapToReachable) {
     const audit = auditTargets(wanted, { isMale, data });
-    wanted = Object.fromEntries(
-      Object.entries(wanted).map(([name, value]) => [name, audit[name].nearest])
-    );
+    for (const name of Object.keys(wanted)) {
+      wanted[name] = { lo: audit[name].lo, hi: audit[name].hi };
+    }
   }
 
   const model = new InverseModel(data, { isMale, correctInconsistency });
   const targetFlat = new Map();
-  for (const [name, value] of Object.entries(wanted)) {
+  for (const [name, spec] of Object.entries(wanted)) {
     const flat = model.nameToFlat.get(name);
     if (flat === undefined) throw new Error(`unknown scale ${name}`);
-    targetFlat.set(flat, Math.trunc(value));
+    targetFlat.set(flat, { lo: Math.trunc(spec.lo), hi: Math.trunc(spec.hi) });
   }
   const weightFlat = new Map(
     Object.entries(weights || {}).map(([name, w]) => [model.nameToFlat.get(name), w])
   );
 
   const penalty = (flat) => {
-    if (!targetFlat.has(flat)) return 0;
-    const gap = Math.abs(model.ts[flat] - targetFlat.get(flat)) - tol;
+    const spec = targetFlat.get(flat);
+    if (!spec) return 0;
+    const gap = Math.abs(distanceOutside(model.ts[flat], spec)) - tol;
     if (gap <= 0) return 0;
     return gap ** exponent * (weightFlat.get(flat) ?? 1);
   };
@@ -610,13 +679,21 @@ export function solve(targets, options = {}) {
   model.reset(bestAnswers);
   const achieved = model.byName();
   const residual = {};
-  for (const [name, want] of Object.entries(wanted)) residual[name] = achieved[name] - want;
+  const bounds = {};
+  const target = {};
+  for (const [name, spec] of Object.entries(wanted)) {
+    residual[name] = distanceOutside(achieved[name], spec);
+    bounds[name] = { lo: spec.lo, hi: spec.hi };
+    // a point target stays a plain number, so existing callers keep working
+    target[name] = spec.lo === spec.hi ? spec.lo : { lo: spec.lo, hi: spec.hi };
+  }
 
   return {
     answers: model.answers.slice(),
     loss: bestLoss,
     achieved,
-    target: { ...wanted },
+    target,
+    bounds,
     requested: { ...targets },
     residual,
     iterations: moved,

@@ -19,6 +19,9 @@ import {
   scaleOptions,
   nearestReachable,
   makeRng,
+  normalizeTarget,
+  distanceOutside,
+  targetPoint,
 } from './inverse.js';
 import {
   itemText,
@@ -48,6 +51,22 @@ export const FAMILY_ORDER = ['basic', 'harris_lingoes', 'wiener_harmon', 'si', '
 export const ITERATION_PRESETS = { quick: 60000, standard: 200000, deep: 600000 };
 
 /**
+ * The four ways a target can be stated.  All of them are the same thing
+ * underneath -- an interval -- so the solver only ever sees {lo, hi}:
+ *
+ *   exact    Hs = 70            {lo: 70, hi: 70}
+ *   range    Hs in 65..75       {lo: 65, hi: 75}
+ *   atLeast  Hs >= 65           {lo: 65, hi: tableMax}
+ *   atMost   Hs <= 70           {lo: tableMin, hi: 70}
+ */
+export const TARGET_MODES = [
+  { id: 'exact', label: '精确值（=）', edges: ['point'] },
+  { id: 'range', label: '区间（lo…hi）', edges: ['lo', 'hi'] },
+  { id: 'atLeast', label: '不低于（≥）', edges: ['lo'] },
+  { id: 'atMost', label: '不高于（≤）', edges: ['hi'] },
+];
+
+/**
  * A mildly elevated clinical profile per gender, for the "载入示例" button.
  * Both sets were produced by running the solver, so they are jointly reachable
  * -- a hand-picked "nice looking" profile usually is not (Hs 70 + D 65 +
@@ -69,6 +88,82 @@ export const EXAMPLE_TARGETS = {
  * Returns {answers, achieved, target, requested, residual, loss, feasible,
  * freedom[1..567], freeItems, lockedItems, lockReason, profile}.
  */
+/** Nearest value a scale can really take, for this gender and VRIN/TRIN formula. */
+function snapTo(list, value) {
+  return list.includes(value) ? value : nearestReachable(list, value);
+}
+
+/**
+ * Which items can be flipped without breaking anything.
+ *
+ * `freedom` is the structural answer -- the item keys into none of the targeted
+ * scales, so *any subset* of those items can be flipped at once (that is what
+ * makes "2 ** n combinations" true).
+ *
+ * `slack` is the weaker, range-only answer: the item does key into a targeted
+ * scale, but flipping it once still leaves every target inside its interval.
+ * Those are safe one at a time, never in bulk: two of them can push the same
+ * scale the same way and walk it out of the range.  The GUI therefore only
+ * ever flips them with a re-check in between.
+ */
+export function analyseFreedom(answers, targets, options = {}) {
+  const { isMale = true, correctInconsistency = false, data = MMPI2_DATA } = options;
+  const model = new InverseModel(data, { isMale, correctInconsistency });
+  model.reset(answers);
+
+  const names = Object.keys(targets || {});
+  const bounds = new Map();
+  const flats = [];
+  for (const name of names) {
+    const flat = model.nameToFlat.get(name);
+    flats.push(flat);
+    bounds.set(flat, normalizeTarget(targets[name]));
+  }
+  const hasRange = [...bounds.values()].some((spec) => spec.lo !== spec.hi);
+
+  const locks = model.itemLocks(flats);
+  const freeItems = [];
+  const lockedItems = [];
+  const lockReason = new Map();
+  for (let item = 1; item <= data.nItems; item += 1) {
+    if (locks[item].length) {
+      lockedItems.push(item);
+      lockReason.set(item, locks[item].map(formatLock));
+    } else {
+      freeItems.push(item);
+    }
+  }
+  const freedom = new Array(data.nItems + 1).fill(false);
+  for (const item of freeItems) freedom[item] = true;
+
+  const slackItems = [];
+  const slack = new Array(data.nItems + 1).fill(false);
+  if (hasRange) {
+    for (const item of lockedItems) {
+      const touched = model._touched(item);
+      const before = new Map();
+      for (const flat of touched) before.set(flat, model.ts[flat]);
+      model._mutate(item);
+      for (const flat of touched) model.ts[flat] = model._computeT(flat);
+      let ok = true;
+      for (const [flat, spec] of bounds) {
+        if (distanceOutside(model.ts[flat], spec) !== 0) {
+          ok = false;
+          break;
+        }
+      }
+      model._mutate(item);
+      for (const [flat, value] of before) model.ts[flat] = value;
+      if (ok) {
+        slackItems.push(item);
+        slack[item] = true;
+      }
+    }
+  }
+
+  return { freedom, freeItems, lockedItems, lockReason, slackItems, slack };
+}
+
 export function planSheet(options = {}) {
   const {
     targets,
@@ -85,11 +180,23 @@ export function planSheet(options = {}) {
   if (!names.length) throw new Error('至少指定一个量表的目标 T 分');
 
   // snap against the value list for this gender *and* VRIN/TRIN formula --
-  // solve() only knows the raw table, which over-promises for VRIN and TRIN
+  // solve() only knows the raw table, which over-promises for VRIN and TRIN.
+  // A range is snapped bound by bound: asking for 66..74 can come back as
+  // 65..74 when 66 is not a value the table can produce.
   const wanted = {};
-  for (const [name, value] of Object.entries(targets)) {
+  const lists = {};
+  for (const [name, spec] of Object.entries(targets)) {
     const list = reachableValuesFor(name, isMale, correctInconsistency, data);
-    wanted[name] = list.includes(value) ? value : nearestReachable(list, value);
+    lists[name] = list;
+    const interval = normalizeTarget(spec);
+    wanted[name] = { lo: snapTo(list, interval.lo), hi: snapTo(list, interval.hi) };
+  }
+  const hasRange = names.some((name) => wanted[name].lo !== wanted[name].hi);
+
+  // startSheet only reads VRIN / TRIN, and it wants plain numbers
+  const startWanted = {};
+  for (const [name, spec] of Object.entries(wanted)) {
+    startWanted[name] = targetPoint(spec, lists[name]);
   }
 
   const result = solve(wanted, {
@@ -98,43 +205,34 @@ export function planSheet(options = {}) {
     iterations,
     seed,
     snapToReachable,
-    start: start || startSheet(wanted, { correctInconsistency, isMale, data }),
+    start: start || startSheet(startWanted, { correctInconsistency, isMale, data }),
     data,
   });
 
-  const model = new InverseModel(data, { isMale, correctInconsistency });
-  model.reset(result.answers);
-  const locks = model.itemLocks(names.map((name) => model.nameToFlat.get(name)));
-
-  const freeItems = [];
-  const lockedItems = [];
-  const lockReason = new Map();
-  for (let item = 1; item <= data.nItems; item += 1) {
-    if (locks[item].length) {
-      lockedItems.push(item);
-      lockReason.set(item, locks[item].map(formatLock));
-    } else {
-      freeItems.push(item);
-    }
-  }
-  const freedom = new Array(data.nItems + 1).fill(false);
-  for (const item of freeItems) freedom[item] = true;
-
+  const analysis = analyseFreedom(result.answers, wanted, {
+    isMale,
+    correctInconsistency,
+    data,
+  });
   const scored = scoreAnswers(result.answers, { isMale, correctInconsistency, data });
 
   return {
     answers: result.answers,
     achieved: result.achieved,
     target: result.target,
+    bounds: result.bounds,
     requested: { ...targets }, // what the user asked for, before snapping
     residual: result.residual,
     loss: result.loss,
     feasible: result.feasible,
     audit: result.audit,
-    freedom,
-    freeItems,
-    lockedItems,
-    lockReason,
+    hasRange,
+    freedom: analysis.freedom,
+    freeItems: analysis.freeItems,
+    slack: analysis.slack,
+    slackItems: analysis.slackItems,
+    lockedItems: analysis.lockedItems,
+    lockReason: analysis.lockReason,
     profile: scored.byName,
     rawByName: scored.rawByName,
     isMale,
@@ -284,6 +382,65 @@ export function randomizeFree(answers, freeItems, seed = 0) {
   return out;
 }
 
+/**
+ * Same, plus the slack items of a range target -- flipped one at a time, and a
+ * flip is only kept when every target is still satisfied.
+ *
+ * They have to go one at a time: two slack items can move the same scale in the
+ * same direction, and together they would walk it out of its interval even
+ * though each one alone is harmless.
+ */
+export function randomizeWithinBounds(answers, targets, options = {}) {
+  const {
+    freeItems = [],
+    slackItems = [],
+    seed = 0,
+    isMale = true,
+    correctInconsistency = false,
+    data = MMPI2_DATA,
+  } = options;
+
+  const out = randomizeFree(answers, freeItems, seed);
+  if (!slackItems.length) return out;
+
+  const rng = makeRng(seed);
+  const model = new InverseModel(data, { isMale, correctInconsistency });
+  const bounds = new Map();
+  for (const [name, spec] of Object.entries(targets || {})) {
+    bounds.set(model.nameToFlat.get(name), normalizeTarget(spec));
+  }
+
+  const order = slackItems.slice();
+  for (let i = order.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rng() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+
+  model.reset(out);
+  for (const item of order) {
+    if (rng() >= 0.5) continue;
+    const touched = model._touched(item);
+    const before = new Map();
+    for (const flat of touched) before.set(flat, model.ts[flat]);
+    model._mutate(item);
+    for (const flat of touched) model.ts[flat] = model._computeT(flat);
+    let ok = true;
+    for (const [flat, spec] of bounds) {
+      if (distanceOutside(model.ts[flat], spec) !== 0) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) {
+      out[item - 1] = !out[item - 1];
+    } else {
+      model._mutate(item);
+      for (const [flat, value] of before) model.ts[flat] = value;
+    }
+  }
+  return out;
+}
+
 /** 569-line CSV, the format mmpi2/grader.py reads back. */
 export function answersToCsv(answers, options = {}) {
   const { isMale = true, lastName = '', firstName = '', age = '', date = '' } = options;
@@ -318,9 +475,34 @@ export function combinationLabel(n) {
 }
 
 /**
- * Parse "Hs=70" / "Sc 81" / "Pt:74" lines into targets.
- * Values outside the T table are reported, not silently rejected.
+ * Parse bulk target lines.  Four shapes, one per mode:
+ *
+ *   Hs=70      Hs 70      Hs:70        exact
+ *   Hs=65-75   Hs 65~75   Hs:65..75    range
+ *   Hs>=65     Hs>65      Hs≥65        at least
+ *   Hs<=70     Hs<70      Hs≤70        at most
+ *
+ * Values outside the T table are reported, not silently rejected.  A point
+ * target comes back as a plain number; everything else as {lo, hi}.
  */
+const TARGET_PATTERNS = [
+  { kind: 'range', re: /^([A-Za-z0-9_]+)\s*(?::|=|\s)\s*(\d{1,3})\s*(?:-|~|–|—|\.{2})\s*(\d{1,3})$/ },
+  { kind: 'atLeast', re: /^([A-Za-z0-9_]+)\s*(?:>=|≥|>)\s*(\d{1,3})$/ },
+  { kind: 'atMost', re: /^([A-Za-z0-9_]+)\s*(?:<=|≤|<)\s*(\d{1,3})$/ },
+  { kind: 'point', re: /^([A-Za-z0-9_]+)\s*(?::|=|\s)\s*(\d{1,3})$/ },
+];
+
+function matchTarget(token) {
+  for (const { kind, re } of TARGET_PATTERNS) {
+    const m = token.match(re);
+    if (!m) continue;
+    if (kind === 'range') return { kind, name: m[1], lo: Number(m[2]), hi: Number(m[3]) };
+    if (kind === 'atMost') return { kind, name: m[1], hi: Number(m[2]) };
+    return { kind, name: m[1], lo: Number(m[2]) };
+  }
+  return null;
+}
+
 export function parseBulkTargets(text, options = {}) {
   const { isMale = true, data = MMPI2_DATA } = options;
   const reachable = data.reachable[isMale ? 'male' : 'female'];
@@ -332,23 +514,48 @@ export function parseBulkTargets(text, options = {}) {
   for (const chunk of String(text).split(/[\n,;]+/)) {
     const token = chunk.trim();
     if (!token) continue;
-    const m = token.match(/^([A-Za-z0-9_]+)\s*[:=\s]\s*(\d{1,3})$/);
-    if (!m) {
-      unknown.push(token);
-      continue;
-    }
-    const name = lookup.get(m[1].toLowerCase());
+    const m = matchTarget(token);
+    const name = m && lookup.get(m.name.toLowerCase());
     if (!name) {
       unknown.push(token);
       continue;
     }
-    const value = Number(m[2]);
-    if (!reachable[name].values.includes(value)) {
-      unreachable.push(`${name} ${value} → ${nearestReachable(reachable[name].values, value)}`);
+    const info = reachable[name];
+    const check = (label, value) => {
+      if (info.values.includes(value)) return;
+      const prefix = label ? `${label} ` : '';
+      unreachable.push(`${name} ${prefix}${value} → ${nearestReachable(info.values, value)}`);
+    };
+
+    if (m.kind === 'point') {
+      check('', m.lo);
+      targets[name] = m.lo;
+    } else if (m.kind === 'range') {
+      check('下限', m.lo);
+      check('上限', m.hi);
+      targets[name] = { lo: Math.min(m.lo, m.hi), hi: Math.max(m.lo, m.hi) };
+    } else if (m.kind === 'atLeast') {
+      check('下限', m.lo);
+      targets[name] = { lo: m.lo, hi: info.max };
+    } else {
+      check('上限', m.hi);
+      targets[name] = { lo: info.min, hi: m.hi };
     }
-    targets[name] = value;
   }
   return { targets, unknown, unreachable };
+}
+
+/** "70" / "65–75" / "≥ 65" / "≤ 70" -- needs the option for min / max. */
+export function formatTarget(spec, option = null) {
+  const t = normalizeTarget(spec);
+  if (!t) return '—';
+  if (t.lo === t.hi) return `${t.lo}`;
+  const openLow = !option || t.lo <= option.min;
+  const openHigh = !option || t.hi >= option.max;
+  if (openLow && openHigh) return '不限';
+  if (openHigh) return `≥ ${t.lo}`;
+  if (openLow) return `≤ ${t.hi}`;
+  return `${t.lo}–${t.hi}`;
 }
 
 /* ------------------------------------------------------------------ *
@@ -360,11 +567,14 @@ const state = {
   correctInconsistency: false,
   iterations: ITERATION_PRESETS.standard,
   seed: 1,
-  options: {},
+  // targets[name] is always an interval {lo, hi}; a point target has lo === hi
+  mode: 'exact',
   targets: {},
+  options: {},
   plan: null,
   answers: null,
   freedom: null,
+  slack: null,
 };
 
 let dom = {};
@@ -496,23 +706,36 @@ function optionsFor(isMale, correct) {
 
 /* -- scale pickers -------------------------------------------------- */
 
+/** The select(s) a row needs in the current mode. */
+function modeEdges(mode) {
+  return TARGET_MODES.find((m) => m.id === mode)?.edges || ['point'];
+}
+
 function buildScaleList() {
   const byFamily = new Map(FAMILY_ORDER.map((f) => [f, []]));
   for (const option of optionsFor(state.isMale, state.correctInconsistency)) {
     byFamily.get(option.family).push(option);
   }
+  const edges = modeEdges(state.mode);
+  const two = edges.length === 2;
 
   const html = FAMILY_ORDER.map((family) => {
     const rows = byFamily.get(family)
       .map((option) => {
-        const selected = state.targets[option.name];
-        const values = option.values
-          .map((v) => `<option value="${v}"${v === selected ? ' selected' : ''}>${v}</option>`)
-          .join('');
+        const current = normalizeTarget(state.targets[option.name]) || { lo: null, hi: null };
+        const picker = (edge) => {
+          const selected = edge === 'hi' ? current.hi : current.lo;
+          const values = option.values
+            .map((v) => `<option value="${v}"${v === selected ? ' selected' : ''}>${v}</option>`)
+            .join('');
+          return `<select data-name="${option.name}" data-edge="${edge}"` +
+            `${edge === 'lo' ? ' title="下限"' : edge === 'hi' ? ' title="上限"' : ''}>` +
+            `<option value="">—</option>${values}</select>`;
+        };
         return (
           `<div class="row" data-name="${option.name}" data-search="${option.name.toLowerCase()} ${option.fullName.toLowerCase()}">` +
           `<span class="abbr">${option.name}</span>` +
-          `<select data-name="${option.name}"><option value="">—</option>${values}</select>` +
+          edges.map(picker).join('') +
           `<span class="full">${option.fullName}</span></div>`
         );
       })
@@ -521,7 +744,7 @@ function buildScaleList() {
     return (
       `<details class="group"${open}><summary>${FAMILY_LABELS[family]}` +
       `<span class="count">${byFamily.get(family).length}</span></summary>` +
-      `<div class="rows">${rows}</div></details>`
+      `<div class="rows${two ? ' two' : ''}">${rows}</div></details>`
     );
   }).join('');
 
@@ -532,10 +755,37 @@ function buildScaleList() {
   applySearch();
 }
 
+/** What the pickers say, completed with the open bound of the current mode. */
 function collectTargets() {
-  const targets = {};
+  const byName = new Map(optionsFor(state.isMale, state.correctInconsistency).map((o) => [o.name, o]));
+  const picked = new Map();
   for (const select of dom.scaleList.querySelectorAll('select')) {
-    if (select.value !== '') targets[select.dataset.name] = Number(select.value);
+    if (select.value === '') continue;
+    const name = select.dataset.name;
+    const edge = select.dataset.edge || 'point';
+    const value = Number(select.value);
+    const entry = picked.get(name) || { lo: null, hi: null };
+    if (edge === 'point') {
+      entry.lo = value;
+      entry.hi = value;
+    } else if (edge === 'lo') {
+      entry.lo = value;
+    } else {
+      entry.hi = value;
+    }
+    picked.set(name, entry);
+  }
+
+  const targets = {};
+  for (const [name, entry] of picked) {
+    const option = byName.get(name);
+    const lo = entry.lo === null
+      ? (state.mode === 'atMost' && option ? option.min : entry.hi)
+      : entry.lo;
+    const hi = entry.hi === null
+      ? (state.mode === 'atLeast' && option ? option.max : entry.lo)
+      : entry.hi;
+    targets[name] = { lo: Math.min(lo, hi), hi: Math.max(lo, hi) };
   }
   return targets;
 }
@@ -543,12 +793,16 @@ function collectTargets() {
 function applyTargets(targets) {
   const byName = new Map(optionsFor(state.isMale, state.correctInconsistency).map((o) => [o.name, o]));
   const notes = [];
-  for (const [name, raw] of Object.entries(targets)) {
+  for (const [name, spec] of Object.entries(targets)) {
     const option = byName.get(name);
     if (!option) continue;
-    const value = option.values.includes(raw) ? raw : nearestReachable(option.values, raw);
-    if (value !== raw) notes.push(`${name}: ${raw} → ${value}`);
-    state.targets[name] = value;
+    const interval = normalizeTarget(spec);
+    const lo = snapTo(option.values, interval.lo);
+    const hi = snapTo(option.values, interval.hi);
+    if (lo !== interval.lo || hi !== interval.hi) {
+      notes.push(`${name}: ${formatTarget(interval, option)} → ${formatTarget({ lo, hi }, option)}`);
+    }
+    state.targets[name] = { lo, hi };
   }
   if (notes.length) setNote(`目标值已折算到可取値：${notes.join('，')}`);
   buildScaleList();
@@ -559,24 +813,81 @@ function retarget(targets) {
   const byName = new Map(optionsFor(state.isMale, state.correctInconsistency).map((o) => [o.name, o]));
   const kept = {};
   const notes = [];
-  for (const [name, value] of Object.entries(targets)) {
+  for (const [name, spec] of Object.entries(targets)) {
     const option = byName.get(name);
     if (!option) continue;
-    if (option.values.includes(value)) {
-      kept[name] = value;
-      continue;
+    const interval = normalizeTarget(spec);
+    const lo = snapTo(option.values, interval.lo);
+    const hi = snapTo(option.values, interval.hi);
+    if (lo !== interval.lo || hi !== interval.hi) {
+      notes.push(`${name}: ${formatTarget(interval, option)} → ${formatTarget({ lo, hi }, option)}`);
     }
-    kept[name] = nearestReachable(option.values, value);
-    notes.push(`${name}: ${value} → ${kept[name]}`);
+    kept[name] = { lo, hi };
   }
   if (notes.length) setNote(`目标値已折算到当前 T 表的可取値：${notes.join('，')}`);
   return kept;
 }
 
+/**
+ * Restate every target in a new mode: a range collapses to its midpoint, an
+ * exact value opens up to the next value above it, and the two one-sided modes
+ * take the far end from the scale's own table.
+ */
+export function convertTargets(targets, mode, options) {
+  const byName = new Map((options || []).map((o) => [o.name, o]));
+  const out = {};
+  for (const [name, spec] of Object.entries(targets)) {
+    const option = byName.get(name);
+    if (!option) continue;
+    const interval = normalizeTarget(spec);
+    const value = interval.lo === interval.hi
+      ? interval.lo
+      : snapTo(option.values, targetPoint(interval, option.values));
+    if (mode === 'range') {
+      const above = option.values.find((v) => v > value);
+      out[name] = { lo: value, hi: above === undefined ? value : above };
+    } else if (mode === 'atLeast') {
+      out[name] = { lo: value, hi: option.max };
+    } else if (mode === 'atMost') {
+      out[name] = { lo: option.min, hi: value };
+    } else {
+      out[name] = { lo: value, hi: value };
+    }
+  }
+  return out;
+}
+
 function onTargetChanged(event) {
   const name = event.target.dataset.name;
-  if (event.target.value === '') delete state.targets[name];
-  else state.targets[name] = Number(event.target.value);
+  if (event.target.value === '') {
+    delete state.targets[name];
+    refreshSolveButton();
+    return;
+  }
+  const value = Number(event.target.value);
+  const edge = event.target.dataset.edge || 'point';
+  const option = optionsFor(state.isMale, state.correctInconsistency)
+    .find((o) => o.name === name);
+  const current = normalizeTarget(state.targets[name]);
+
+  let lo = value;
+  let hi = value;
+  if (state.mode === 'range') {
+    if (edge === 'lo') {
+      lo = value;
+      hi = current ? Math.max(current.hi, value) : value;
+    } else {
+      hi = value;
+      lo = current ? Math.min(current.lo, value) : value;
+    }
+  } else if (state.mode === 'atLeast') {
+    lo = value;
+    hi = option ? option.max : value;
+  } else if (state.mode === 'atMost') {
+    hi = value;
+    lo = option ? option.min : value;
+  }
+  state.targets[name] = { lo, hi };
   refreshSolveButton();
 }
 
@@ -637,6 +948,7 @@ function runPlan({ newSeed = false } = {}) {
     state.plan = plan;
     state.answers = plan.answers.slice();
     state.freedom = plan.freedom;
+    state.slack = plan.slack;
     renderStatus(plan, Date.now() - started);
     renderTargetTable(plan);
     renderProfile(plan.profile);
@@ -648,12 +960,16 @@ function runPlan({ newSeed = false } = {}) {
 }
 
 function renderStatus(plan, ms) {
+  const byName = new Map(optionsFor(state.isMale, state.correctInconsistency).map((o) => [o.name, o]));
   const off = Object.entries(plan.residual).filter(([, v]) => v !== 0);
   const snapped = Object.entries(plan.requested).filter(
-    ([name, value]) => plan.target[name] !== value
+    ([name, value]) => JSON.stringify(plan.target[name]) !== JSON.stringify(value)
   );
+  const count = Object.keys(plan.target).length;
   if (plan.feasible) {
-    dom.status.textContent = `完全命中 ${Object.keys(plan.target).length} 个目标（耗时 ${ms} ms）。`;
+    dom.status.textContent = plan.hasRange
+      ? `${count} 个目标全部落在预期区间内（耗时 ${ms} ms）。`
+      : `完全命中 ${count} 个目标（耗时 ${ms} ms）。`;
     dom.status.className = 'status ok';
   } else {
     dom.status.textContent =
@@ -665,12 +981,19 @@ function renderStatus(plan, ms) {
   if (snapped.length) {
     setNote(
       '以下目标不在 T 表可取値内，已折算：' +
-        snapped.map(([name, value]) => `${name} ${value} → ${plan.target[name]}`).join('，')
+        snapped
+          .map(
+            ([name, value]) =>
+              `${name} ${formatTarget(value, byName.get(name))} → ` +
+              `${formatTarget(plan.target[name], byName.get(name))}`
+          )
+          .join('，')
     );
   }
 }
 
 function renderTargetTable(plan) {
+  const byName = new Map(optionsFor(state.isMale, state.correctInconsistency).map((o) => [o.name, o]));
   const rows = Object.keys(plan.target)
     .map((name) => {
       const gap = plan.residual[name];
@@ -684,13 +1007,20 @@ function renderTargetTable(plan) {
           ` title="中国 ${MMPI2_DATA.cnNorms.cutoffCN} 分界点 = 美国 ` +
           `${usTForCn60(name, plan.isMale).toFixed(1)} 分">${tCN}</td>`;
       const cls = gap === 0 ? 'ok' : 'bad';
-      const want = plan.requested[name] === plan.target[name]
-        ? `${plan.target[name]}`
-        : `${plan.requested[name]} → ${plan.target[name]}`;
+      const label = formatTarget(plan.bounds[name], byName.get(name));
+      const same = JSON.stringify(plan.requested[name]) === JSON.stringify(plan.target[name]);
+      const want = same
+        ? label
+        : `${formatTarget(plan.requested[name], byName.get(name))} → ${label}`;
+      const gapTitle = gap === 0
+        ? '落在预期区间内'
+        : gap < 0
+          ? `低于下限 ${-gap} 分`
+          : `高于上限 ${gap} 分`;
       return (
         `<tr class="${cls}"><td class="abbr">${name}</td><td>${want}</td>` +
         `<td>${got}</td>${cnCell}` +
-        `<td>${gap === 0 ? '0' : (gap > 0 ? '+' : '') + gap}</td></tr>`
+        `<td title="${gapTitle}">${gap === 0 ? '0' : (gap > 0 ? '+' : '') + gap}</td></tr>`
       );
     })
     .join('');
@@ -741,22 +1071,49 @@ function questionHtml(text, lang) {
   return escapeHtml(text.zh);
 }
 
+/**
+ * Recompute the free / slack split.  Needed whenever the answers changed under
+ * the plan's feet -- a slack flip moves a targeted scale, so which items are
+ * still flippable depends on where the profile sits now.
+ */
+function refreshFreedom() {
+  if (!state.plan) return;
+  const analysis = analyseFreedom(state.answers, state.plan.bounds, {
+    isMale: state.isMale,
+    correctInconsistency: state.correctInconsistency,
+  });
+  state.freedom = analysis.freedom;
+  state.slack = analysis.slack;
+  Object.assign(state.plan, {
+    freeItems: analysis.freeItems,
+    slackItems: analysis.slackItems,
+    lockedItems: analysis.lockedItems,
+    lockReason: analysis.lockReason,
+  });
+}
+
 function renderAnswers(plan) {
   const parts = [];
   const showText = dom.showText ? dom.showText.checked : false;
   const lang = dom.textLang ? dom.textLang.value : 'zh';
   for (let item = 1; item <= MMPI2_DATA.nItems; item += 1) {
     const free = state.freedom[item];
+    const slacky = !free && !!state.slack && state.slack[item];
     const answer = state.answers[item - 1] ? 'T' : 'F';
     const text = itemText(item);
+    const reasons = plan.lockReason.get(item);
     const title = [
-      `第 ${item} 题：` + (free ? '自由（翻转不影响目标量表）'
-        : `锁定（翻转会改变 ${plan.lockReason.get(item).join('、')}）`),
+      `第 ${item} 题：` + (free
+        ? '自由（翻转不影响目标量表）'
+        : slacky
+          ? `区间内可翻转（翻转后目标仍全部落在区间内；会改动 ${(reasons || []).join('、')}）`
+          : `锁定（翻转会改变 ${(reasons || []).join('、')}）`),
       text.zh,
       text.en,
     ].join('\n');
     parts.push(
-      `<div class="cell ${free ? 'free' : 'locked'} ${answer === 'T' ? 'is-t' : 'is-f'}"` +
+      `<div class="cell ${free ? 'free' : 'locked'}${slacky ? ' slack' : ''} ` +
+        `${answer === 'T' ? 'is-t' : 'is-f'}"` +
         ` data-item="${item}" title="${escapeAttr(title)}">` +
         `<span class="n">${item}</span><b>${answer}</b>` +
         (showText ? `<span class="q">${questionHtml(text, lang)}</span>` : '') +
@@ -765,7 +1122,10 @@ function renderAnswers(plan) {
   }
   dom.answers.innerHTML = parts.join('');
   dom.answers.classList.toggle('with-text', showText);
-  dom.freeCount.textContent = `自由题 ${plan.freeItems.length} 道 · ${combinationLabel(plan.freeItems.length)}`;
+  const slackCount = plan.slackItems ? plan.slackItems.length : 0;
+  dom.freeCount.textContent =
+    `自由题 ${plan.freeItems.length} 道 · ${combinationLabel(plan.freeItems.length)}` +
+    (slackCount ? `；另有 ${slackCount} 道在区间内可翻转` : '');
 }
 
 /**
@@ -824,13 +1184,21 @@ function renderItemBank() {
 
 function onAnswerClick(event) {
   const cell = event.target.closest('.cell');
-  if (!cell || !cell.classList.contains('free') || !state.plan) return;
+  if (!cell || !state.plan) return;
+  const isFree = cell.classList.contains('free');
+  const isSlack = cell.classList.contains('slack');
+  if (!isFree && !isSlack) return;
   const item = Number(cell.dataset.item);
   state.answers[item - 1] = !state.answers[item - 1];
   const answer = state.answers[item - 1] ? 'T' : 'F';
   cell.querySelector('b').textContent = answer;
   cell.classList.toggle('is-t', state.answers[item - 1]);
   cell.classList.toggle('is-f', !state.answers[item - 1]);
+  if (isSlack) {
+    // the flip moved a targeted scale, so the free / slack split is stale
+    refreshFreedom();
+    renderAnswers(state.plan);
+  }
   renderProfile(
     scoreAnswers(state.answers, {
       isMale: state.isMale,
@@ -935,6 +1303,7 @@ function importFromFile(file) {
 function invalidate(message) {
   state.plan = null;
   state.answers = null;
+  state.slack = null;
   dom.results.hidden = true;
   dom.status.textContent = message;
   dom.status.className = 'status';
@@ -962,12 +1331,32 @@ function wire() {
   });
 
   dom.search.addEventListener('input', applySearch);
+  if (dom.targetMode) {
+    dom.targetMode.addEventListener('change', () => {
+      state.mode = dom.targetMode.value;
+      state.targets = convertTargets(
+        state.targets,
+        state.mode,
+        optionsFor(state.isMale, state.correctInconsistency)
+      );
+      buildScaleList();
+      invalidate('预期值模式已切换，请重新生成答卷。');
+    });
+  }
   dom.solve.addEventListener('click', () => runPlan());
   dom.again.addEventListener('click', () => runPlan({ newSeed: true }));
   dom.shuffle.addEventListener('click', () => {
     if (!state.plan) return;
     state.seed = (state.seed * 1103515245 + 12345) % 2147483647;
-    state.answers = randomizeFree(state.answers, state.plan.freeItems, state.seed);
+    // slack items only exist for range targets, and have to go one at a time
+    state.answers = randomizeWithinBounds(state.answers, state.plan.bounds, {
+      freeItems: state.plan.freeItems,
+      slackItems: state.plan.slackItems,
+      seed: state.seed,
+      isMale: state.isMale,
+      correctInconsistency: state.correctInconsistency,
+    });
+    refreshFreedom();
     renderAnswers(state.plan);
     renderItemBank();
     renderProfile(
@@ -1068,10 +1457,17 @@ export function init() {
     'export-contents', 'export-format', 'export-english', 'export-run-panel',
     'import-text', 'import-file', 'import-score', 'import-target', 'import-note',
     'text-lang', 'bank-search', 'bank-filter', 'bank-table', 'bank-count',
+    'target-mode',
   ];
   dom = {};
   for (const id of ids) {
     dom[camel(id)] = document.getElementById(id);
+  }
+  if (dom.targetMode) {
+    dom.targetMode.innerHTML = TARGET_MODES
+      .map((m) => `<option value="${m.id}">${m.label}</option>`)
+      .join('');
+    dom.targetMode.value = state.mode;
   }
   dom.note.hidden = true;
   dom.results.hidden = true;
