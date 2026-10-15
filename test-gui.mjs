@@ -84,7 +84,7 @@ const check = (ok, label, extra = '') => {
   const watched = new Set(Object.keys(targets).map((n) => model2.nameToFlat.get(n)));
   let mislabelled = 0;
   for (const item of plan.lockedItems) {
-    const direct = model2.deltas[item].some(
+    const direct = model2.byItem[item].some(
       ([flat]) => watched.has(flat) || (flat === model2.kFlat && model2.itemLocks)
     );
     if (!direct && !plan.lockReason.get(item).some((r) => r === 'VRIN' || r === 'TRIN')) {

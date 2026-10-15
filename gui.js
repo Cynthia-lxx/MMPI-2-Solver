@@ -34,6 +34,7 @@ import {
   EXPORT_CONTENTS,
   EXPORT_FORMATS,
 } from './sheet.js';
+import { itemFormatDesc } from './formats.js';
 
 export { MMPI2_DATA };
 export { itemText, cnT, usTForCn60, buildSheets, serialize, parseAnswers, EXPORT_CONTENTS, EXPORT_FORMATS };
@@ -1154,14 +1155,32 @@ function renderAnswers(plan) {
       text.zh,
       text.en,
     ].join('\n');
-    parts.push(
-      `<div class="cell ${free ? 'free' : 'locked'}${slacky ? ' slack' : ''} ` +
-        `${answer === 'T' ? 'is-t' : 'is-f'}"` +
-        ` data-item="${item}" title="${escapeAttr(title)}">` +
-        `<span class="n">${item}</span><b>${answer}</b>` +
-        (showText ? `<span class="q">${questionHtml(text, lang)}</span>` : '') +
-        '</div>'
-    );
+    const desc = itemFormatDesc(MMPI2_DATA, item);
+    if (desc.type === 'binary') {
+      // TF：保持原结构（测试依赖 .cell > b 与 data-item）
+      parts.push(
+        `<div class="cell ${free ? 'free' : 'locked'}${slacky ? ' slack' : ''} ` +
+          `${answer === 'T' ? 'is-t' : 'is-f'}"` +
+          ` data-item="${item}" title="${escapeAttr(title)}">` +
+          `<span class="n">${item}</span><b>${answer}</b>` +
+          (showText ? `<span class="q">${questionHtml(text, lang)}</span>` : '') +
+          '</div>'
+      );
+    } else {
+      // 多级作答（Likert / Choice）：渲染级别按钮，待未来非 TF 量表启用
+      const lvl = state.answers[item - 1];
+      const btns = desc.levels.map((lv) =>
+        `<button type="button" class="lvl${lv.value === lvl ? ' on' : ''}" ` +
+        `data-item="${item}" data-level="${lv.value}" title="${escapeAttr(lv.label)}">${lv.value + 1}</button>`
+      ).join('');
+      parts.push(
+        `<div class="cell multi ${free ? 'free' : 'locked'}${slacky ? ' slack' : ''}" ` +
+          `data-item="${item}" title="${escapeAttr(title)}">` +
+          `<span class="n">${item}</span><span class="lvls">${btns}</span>` +
+          (showText ? `<span class="q">${questionHtml(text, lang)}</span>` : '') +
+          '</div>'
+      );
+    }
   }
   dom.answers.innerHTML = parts.join('');
   dom.answers.classList.toggle('with-text', showText);
@@ -1235,10 +1254,25 @@ function onAnswerClick(event) {
   }
   const cell = event.target.closest('.cell');
   if (!cell || !state.plan) return;
+  const item = Number(cell.dataset.item);
+  // 多级作答：点击具体级别按钮直接设定该级别（TF 无 [data-level]，走下方翻转）
+  const lvlBtn = event.target.closest('[data-level]');
+  if (lvlBtn) {
+    const level = Number(lvlBtn.dataset.level);
+    if (state.answers[item - 1] === level) return;
+    state.answers[item - 1] = level;
+    refreshFreedom();
+    renderAnswers(state.plan);
+    renderProfile(scoreAnswers(state.answers, {
+      isMale: state.isMale,
+      correctInconsistency: state.correctInconsistency,
+    }).byName);
+    renderItemBank();
+    return;
+  }
   const isFree = cell.classList.contains('free');
   const isSlack = cell.classList.contains('slack');
   if (!isFree && !isSlack) return;
-  const item = Number(cell.dataset.item);
   state.answers[item - 1] = !state.answers[item - 1];
   const answer = state.answers[item - 1] ? 'T' : 'F';
   cell.querySelector('b').textContent = answer;

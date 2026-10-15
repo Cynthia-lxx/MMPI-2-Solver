@@ -25,8 +25,16 @@
  */
 
 import { MMPI2_DATA } from './data.js';
+import { FORMATS, itemFormat, isTrue, levelCount, formatLevels } from './formats.js';
 
 export { MMPI2_DATA };
+
+/** 任意原始作答 -> 内部级别索引（布尔/数字/缺失统一处理）。 */
+function toLevel(raw) {
+  if (raw === null || raw === undefined) return 0;
+  if (typeof raw === 'boolean') return raw ? 1 : 0;
+  return Number(raw);
+}
 
 /* ------------------------------------------------------------------ *
  * small helpers
@@ -113,25 +121,59 @@ export class InverseModel {
     this.reset();
   }
 
-  /** base[flat] = score of the all-False sheet; deltas[item] = [[flat, +/-1]]. */
+  /**
+   * 把计分关系建成「每题每级权重」表，对所有作答格式统一适用。
+   *
+   * - `weights[flat]` 是 Map(题号 -> 各级点数数组)，`raws[flat] = Σ_i weights[flat].get(i)[level_i]`。
+   * - `byItem[item]` 是 [[flat, 点数数组], ...]，便于增量更新与「题项影响哪些量表」查询。
+   *
+   * TF 量表由 `keys` 推导：T 键题权重 [0,1]、F 键题权重 [1,0]；这样原始分 = #T键真 + #F键假，
+   * 与旧版 `base + Σ(答案?+δ:−δ)` 数值完全一致。带 `slot.weights` 的量表（Likert/Choice 等）
+   * 直接采用，无需特判，是后续引入新量表的扩展点。
+   */
   _buildLinearModel() {
     const n = this.nScales;
-    this.base = new Array(n).fill(0);
-    this.deltas = Array.from({ length: this.nItems + 1 }, () => []);
+    this.weights = Array.from({ length: n }, () => new Map());
+    this.byItem = Array.from({ length: this.nItems + 1 }, () => []);
 
     const slotOf = new Map();
     for (const slot of this.slots) {
       if (slot.kind === 'keyed') slotOf.set(`${slot.family}:${slot.p}`, slot);
     }
+
+    // 每题的级别数（用于求解器枚举级别）；TF 为 2，其余看题项格式
+    //（自定义格式放在 data.formats 里，需回退查找）
+    this.itemLevels = new Array(this.nItems + 1).fill(2);
+    for (let item = 1; item <= this.nItems; item += 1) {
+      const id = itemFormat(this.data, item);
+      const fmt = FORMATS[id] || (this.data.formats && this.data.formats[id]) || FORMATS.tf;
+      this.itemLevels[item] = levelCount(fmt);
+    }
+
     for (let family = 0; family < this.keys.length; family += 1) {
       const arrays = this.keys[family];
       for (let p = 0; p < arrays.length / 2; p += 1) {
         const slot = slotOf.get(`${family}:${p}`);
-        this.base[slot.flat] = arrays[2 * p + 1].length;
-        for (const item of arrays[2 * p]) this.deltas[item].push([slot.flat, +1]);
-        for (const item of arrays[2 * p + 1]) this.deltas[item].push([slot.flat, -1]);
+        // VRIN/TRIN 等非常规键控量表不在 keys 里走权重，而由一致性计数单独处理
+        if (!slot) continue;
+        let map;
+        if (slot.weights) {
+          map = new Map(Object.entries(slot.weights).map(([k, v]) => [Number(k), v]));
+        } else {
+          // 由 keys 推导：arrays[2p] 为 T 键题（True 计 1），arrays[2p+1] 为 F 键题（False 计 1）
+          map = new Map();
+          for (const item of arrays[2 * p]) map.set(item, [0, 1]);
+          for (const item of arrays[2 * p + 1]) map.set(item, [1, 0]);
+        }
+        this.weights[slot.flat] = map;
+        for (const [item, w] of map) this.byItem[item].push([slot.flat, w]);
       }
     }
+  }
+
+  /** 题项 item 的作答级别数（TF=2）。 */
+  levelCountOf(item) {
+    return this.itemLevels[item] || 2;
   }
 
   _buildPairMembership() {
@@ -155,14 +197,15 @@ export class InverseModel {
 
   reset(answers = null) {
     const n = this.nItems;
-    this.answers = answers
-      ? Array.from({ length: n }, (_, i) => answers[i] === true)
-      : new Array(n).fill(false);
+    // 公开接口沿用布尔 T/F（TF 特例）；多级量表未来存整数级别，这里原样保留。
+    this.answers = answers ? answers.slice() : new Array(n).fill(false);
+    this.raws = new Array(this.nScales).fill(0);
 
-    this.raws = this.base.slice();
     for (let i = 0; i < n; i += 1) {
-      if (!this.answers[i]) continue;
-      for (const [flat, d] of this.deltas[i + 1]) this.raws[flat] += d;
+      const raw = answers ? (answers[i] == null ? false : answers[i]) : false;
+      const lvl = toLevel(raw);
+      const item = i + 1;
+      for (const [flat, w] of this.byItem[item]) this.raws[flat] += w[lvl] || 0;
     }
 
     let vrin = 0;
@@ -177,18 +220,21 @@ export class InverseModel {
 
     this.ts = new Array(this.nScales);
     for (let flat = 0; flat < this.nScales; flat += 1) this.ts[flat] = this._computeT(flat);
+    this.rawByName = {};
+    for (const slot of this.data.scales) this.rawByName[slot.name] = this.raws[slot.flat];
     return this;
   }
 
   _vrinHit(j) {
-    const a = this.answers[this.vrinPairs[2 * j] - 1];
-    const b = this.answers[this.vrinPairs[2 * j + 1] - 1];
+    const a = isTrue(this.answers[this.vrinPairs[2 * j] - 1]);
+    const b = isTrue(this.answers[this.vrinPairs[2 * j + 1] - 1]);
     return a === this.vrinExpected[2 * j] && b === this.vrinExpected[2 * j + 1];
   }
 
   _trinHit(j, wantTrue) {
     const pair = wantTrue ? this.truePairs : this.falsePairs;
-    return this.answers[pair[2 * j] - 1] === wantTrue && this.answers[pair[2 * j + 1] - 1] === wantTrue;
+    return isTrue(this.answers[pair[2 * j] - 1]) === wantTrue &&
+      isTrue(this.answers[pair[2 * j + 1] - 1]) === wantTrue;
   }
 
   _computeT(flat) {
@@ -208,31 +254,59 @@ export class InverseModel {
     return clampLookup(this.tables[slot.family][slot.y], raw);
   }
 
-  /** Flip item (1-based) in place; symmetric, so calling it again undoes it. */
-  _mutate(item) {
+  /**
+   * 把题项 item（1-based）直接赋值为新作答 newRaw，增量更新 raws 与一致性计数。
+   * newRaw 对 TF 是布尔，多级量表是整数级别；raws 始终按级别换算，故二者通用。
+   */
+  _assign(item, newRaw) {
     const i = item - 1;
-    const oldVrin = this.vrinPairsOf[item].map((j) => (this._vrinHit(j) ? 1 : 0));
-    const oldTrue = this.trinTruePairsOf[item].map((j) => (this._trinHit(j, true) ? 1 : 0));
-    const oldFalse = this.trinFalsePairsOf[item].map((j) => (this._trinHit(j, false) ? 1 : 0));
-
-    this.answers[i] = !this.answers[i];
-    const sign = this.answers[i] ? 1 : -1;
-    for (const [flat, d] of this.deltas[item]) this.raws[flat] += sign * d;
-
-    this.vrinPairsOf[item].forEach((j, k) => {
-      this.vrinConsistent += (this._vrinHit(j) ? 1 : 0) - oldVrin[k];
-    });
-    this.trinTruePairsOf[item].forEach((j, k) => {
-      this.trinTrue += (this._trinHit(j, true) ? 1 : 0) - oldTrue[k];
-    });
-    this.trinFalsePairsOf[item].forEach((j, k) => {
-      this.trinFalse += (this._trinHit(j, false) ? 1 : 0) - oldFalse[k];
-    });
+    const old = this.answers[i];
+    if (old === newRaw) return;
+    const oldLvl = toLevel(old);
+    const newLvl = toLevel(newRaw);
+    for (const [flat, w] of this.byItem[item]) {
+      this.raws[flat] += (w[newLvl] || 0) - (w[oldLvl] || 0);
+    }
+    if (
+      this.vrinPairsOf[item].length ||
+      this.trinTruePairsOf[item].length ||
+      this.trinFalsePairsOf[item].length
+    ) {
+      const oldVrin = this.vrinPairsOf[item].map((j) => (this._vrinHit(j) ? 1 : 0));
+      const oldTrue = this.trinTruePairsOf[item].map((j) => (this._trinHit(j, true) ? 1 : 0));
+      const oldFalse = this.trinFalsePairsOf[item].map((j) => (this._trinHit(j, false) ? 1 : 0));
+      this.answers[i] = newRaw;
+      this.vrinPairsOf[item].forEach((j, k) => {
+        this.vrinConsistent += (this._vrinHit(j) ? 1 : 0) - oldVrin[k];
+      });
+      this.trinTruePairsOf[item].forEach((j, k) => {
+        this.trinTrue += (this._trinHit(j, true) ? 1 : 0) - oldTrue[k];
+      });
+      this.trinFalsePairsOf[item].forEach((j, k) => {
+        this.trinFalse += (this._trinHit(j, false) ? 1 : 0) - oldFalse[k];
+      });
+    } else {
+      this.answers[i] = newRaw;
+    }
   }
 
-  /** Scales whose T score can change when `item` flips. */
+  /** 翻转题项（TF 专用）；多级题请用 _assign。 */
+  _mutate(item) {
+    const i = item - 1;
+    this._assign(item, !this.answers[i]);
+  }
+
+  /** 为 move 选一个与当前不同的作答：TF（2 级）即翻转并保留布尔；多级则随机挑一个其它级别。 */
+  _nextLevel(item, cur, rng) {
+    const L = this.levelCountOf(item);
+    if (L <= 2) return !cur;
+    const r = Math.floor(rng() * (L - 1));
+    return (toLevel(cur) + 1 + r) % L;
+  }
+
+  /** Scales whose T score can change when `item` is reassigned. */
   _touched(item) {
-    const flats = new Set(this.deltas[item].map(([flat]) => flat));
+    const flats = new Set(this.byItem[item].map(([flat]) => flat));
     if (this.vrinPairsOf[item].length) flats.add(this.vrinFlat);
     if (this.trinTruePairsOf[item].length || this.trinFalsePairsOf[item].length) {
       flats.add(this.trinFlat);
@@ -263,7 +337,7 @@ export class InverseModel {
 
     for (let item = 1; item <= this.nItems; item += 1) {
       const reasons = [];
-      for (const [flat] of this.deltas[item]) {
+      for (const [flat] of this.byItem[item]) {
         if (watched.has(flat)) {
           reasons.push({ name: this.slots[flat].name, viaK: false });
         } else if (kMatters && flat === this.kFlat) {
@@ -324,12 +398,35 @@ export function scoreAnswers(answers, options = {}) {
   const keys = block.keys;
   const tables = block.tables;
 
-  const totals = keys.map((arrays) => {
-    const out = [];
+  // 每 (family,p) 量表的每题权重；TF 由 keys 推导，带 weights 的量表直接用。
+  // 这样原始分 = Σ 权重，TF 特例下等于「T 键真 + F 键假」，与旧逻辑数值一致。
+  const slotByFP = new Map();
+  for (const slot of data.scales) if (slot.kind === 'keyed') slotByFP.set(`${slot.family}:${slot.p}`, slot);
+  const wmapByFP = new Map();
+  for (let family = 0; family < keys.length; family += 1) {
+    const arrays = keys[family];
     for (let y = 0; y < arrays.length; y += 2) {
+      const p = y / 2; // 每量表占两个数组（T 键、F 键），y 为数组下标
+      const slot = slotByFP.get(`${family}:${p}`);
+      let wm;
+      if (slot && slot.weights) {
+        wm = new Map(Object.entries(slot.weights).map(([k, v]) => [Number(k), v]));
+      } else {
+        wm = new Map();
+        for (const it of arrays[y]) wm.set(it, [0, 1]);
+        for (const it of arrays[y + 1]) wm.set(it, [1, 0]);
+      }
+      wmapByFP.set(`${family}:${y}`, wm);
+    }
+  }
+  const toLevel = (a) => (a == null ? 0 : (typeof a === 'boolean' ? (a ? 1 : 0) : Number(a)));
+
+  const totals = keys.map((arrays, family) => {
+    const out = [];
+    for (let p = 0; p < arrays.length; p += 2) {
+      const wm = wmapByFP.get(`${family}:${p}`);
       let subtotal = 0;
-      for (const item of arrays[y]) if (answers[item - 1] === true) subtotal += 1;
-      for (const item of arrays[y + 1]) if (answers[item - 1] === false) subtotal += 1;
+      for (const [item, w] of wm) subtotal += w[toLevel(answers[item - 1])] || 0;
       out.push(subtotal);
     }
     return out;
@@ -341,8 +438,8 @@ export function scoreAnswers(answers, options = {}) {
   let consistent = 0;
   for (let i = 0; i < vrinPairs.length; i += 2) {
     if (
-      answers[vrinPairs[i] - 1] === vrinExpected[i] &&
-      answers[vrinPairs[i + 1] - 1] === vrinExpected[i + 1]
+      isTrue(answers[vrinPairs[i] - 1]) === vrinExpected[i] &&
+      isTrue(answers[vrinPairs[i + 1] - 1]) === vrinExpected[i + 1]
     ) {
       consistent += 1;
     }
@@ -354,11 +451,11 @@ export function scoreAnswers(answers, options = {}) {
   const falsePairs = data.response.falsePairs;
   let bothTrue = 0;
   for (let i = 0; i < truePairs.length; i += 2) {
-    if (answers[truePairs[i] - 1] === true && answers[truePairs[i + 1] - 1] === true) bothTrue += 1;
+    if (isTrue(answers[truePairs[i] - 1]) && isTrue(answers[truePairs[i + 1] - 1])) bothTrue += 1;
   }
   let bothFalse = 0;
   for (let i = 0; i < falsePairs.length; i += 2) {
-    if (answers[falsePairs[i] - 1] === false && answers[falsePairs[i + 1] - 1] === false) {
+    if (!isTrue(answers[falsePairs[i] - 1]) && !isTrue(answers[falsePairs[i + 1] - 1])) {
       bothFalse += 1;
     }
   }
@@ -612,7 +709,9 @@ export function solve(targets, options = {}) {
       before.set(flat, model.ts[flat]);
       beforePen += penalty(flat);
     }
-    model._mutate(item);
+    const cur = model.answers[item - 1];
+    const next = model._nextLevel(item, cur, rng);
+    model._assign(item, next);
     for (const flat of touched) model.ts[flat] = model._computeT(flat);
     let afterPen = 0;
     for (const flat of touched) afterPen += penalty(flat);
@@ -626,7 +725,7 @@ export function solve(targets, options = {}) {
         bestAnswers = model.answers.slice();
       }
     } else {
-      model._mutate(item);
+      model._assign(item, cur);
       for (const [flat, value] of before) model.ts[flat] = value;
     }
     if (bestLoss === 0 && !polish) break;
@@ -654,7 +753,9 @@ export function solve(targets, options = {}) {
           before.set(flat, model.ts[flat]);
           beforePen += penalty(flat);
         }
-        model._mutate(item);
+        const cur = model.answers[item - 1];
+        const next = model._nextLevel(item, cur, rng);
+        model._assign(item, next);
         for (const flat of touched) model.ts[flat] = model._computeT(flat);
         let afterPen = 0;
         for (const flat of touched) afterPen += penalty(flat);
@@ -664,7 +765,7 @@ export function solve(targets, options = {}) {
           moved += 1;
           improved = true;
         } else {
-          model._mutate(item);
+          model._assign(item, cur);
           for (const [flat, value] of before) model.ts[flat] = value;
         }
       }

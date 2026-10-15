@@ -224,6 +224,15 @@
   .cell b { font-size: 12px; }
   .cell.is-t b { color: var(--accent); }
   .cell.is-f b { color: var(--muted); }
+  /* 多级作答（Likert / Choice）的级别按钮，待未来非 TF 量表启用 */
+  .cell.multi { flex-wrap: wrap; gap: 3px; align-content: center; }
+  .cell.multi .lvls { flex: 1 1 100%; display: flex; gap: 3px; justify-content: center; }
+  .cell.multi .lvl {
+    flex: 1; min-width: 0; height: 22px; padding: 0 2px; font-size: 11px;
+    border: 1px solid var(--line); border-radius: 4px; background: var(--cell-bg);
+    color: var(--fg); cursor: pointer;
+  }
+  .cell.multi .lvl.on { background: var(--accent); color: #fff; border-color: var(--accent); }
   .cell.locked { border-style: solid; opacity: .78; }
   /* 区间目标下，翻转后目标仍全部落在区间内的题 */
   .cell.slack { border-style: dashed; border-color: var(--accent); background: var(--slack-bg); cursor: pointer; }

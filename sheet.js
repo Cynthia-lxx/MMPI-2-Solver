@@ -8,12 +8,21 @@
 
 import { MMPI2_DATA } from './data.js';
 import { sheetsToXlsx } from './xlsx.js';
+import { itemFormatDesc, levelCount } from './formats.js';
 
 /* -- item text and Chinese norms -------------------------------------- */
 
 /** Item text for a 1-based item number: {en, zh}. */
 export function itemText(item, data = MMPI2_DATA) {
   return { en: data.items.en[item - 1], zh: data.items.zh[item - 1] };
+}
+
+/** 某题作答的展示文本：TF 为 T/F，多级量表为「1 起的级别序号」。 */
+export function answerLabel(data, item, answer) {
+  if (answer === null || answer === undefined) return '';
+  const desc = itemFormatDesc(data, item);
+  if (desc.type === 'binary') return answer ? 'T' : 'F';
+  return String(Number(answer) + 1);
 }
 
 /**
@@ -61,7 +70,7 @@ export function answerSheet(plan, options = {}) {
   for (let item = 1; item <= data.nItems; item += 1) {
     const free = plan.freedom[item];
     const text = itemText(item, data);
-    const row = [item, text.zh, plan.answers[item - 1] ? 'T' : 'F'];
+    const row = [item, text.zh, answerLabel(data, item, plan.answers[item - 1])];
     if (withEnglish) row.push(text.en);
     if (withLockInfo) {
       row.push(free ? '自由' : '锁定');
@@ -123,7 +132,7 @@ export function targetSheet(plan, options = {}) {
 /** Printable blank answer sheet: hand it to a person, type their answers in. */
 export function blankTemplate(options = {}) {
   const { withEnglish = true, data = MMPI2_DATA } = options;
-  const header = ['题号', '中文题干', '回答（T/F）'];
+  const header = ['题号', '中文题干', '回答'];
   if (withEnglish) header.push('英文题干');
   const rows = [header];
   for (let item = 1; item <= data.nItems; item += 1) {
@@ -302,6 +311,24 @@ export function parseAnswers(text, options = {}) {
   const source = String(text ?? '');
 
   const stripped = source.replace(/\s+/g, '');
+  // 纯数字/问号串：TF 的 0/1 串，或 Likert/Choice 的级别串（每字一个级别）
+  const digitCompact = stripped.match(/[0-9?]/g);
+  if (
+    digitCompact &&
+    digitCompact.length === data.nItems &&
+    !/[,;\t]/.test(source) &&
+    !/[A-Za-z]/.test(source)
+  ) {
+    for (const ch of digitCompact) {
+      if (ch === '?') cells.push(null);
+      else {
+        const v = Number(ch);
+        // 0/1 仍按 TF 布尔处理，保持与旧版兼容；更高级别保留为整型
+        cells.push(v === 0 ? false : v === 1 ? true : v);
+      }
+    }
+    return finish(cells, data, errors);
+  }
   const compact = stripped.match(/[TFtf01?]/g);
   if (compact && compact.length === data.nItems && !/[,;\t]/.test(source)) {
     // a bare 567-character string
@@ -317,7 +344,7 @@ export function parseAnswers(text, options = {}) {
   for (const rawLine of source.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line) continue;
-    // "42 T", "42,T", "42. True", or just "T"
+    // "42 T", "42,T", "42. True", "42 3"（多级题的级别），或单独的 "T" / "3"
     let token = line;
     const numbered = line.match(/^\s*(\d{1,3})\s*[.,:、\s\t]+\s*(.+)$/);
     if (numbered) token = numbered[2].trim();
@@ -327,6 +354,7 @@ export function parseAnswers(text, options = {}) {
     if (ANSWER_UNKNOWN.has(lower)) cells.push(null);
     else if (ANSWER_TRUE.has(lower)) cells.push(true);
     else if (ANSWER_FALSE.has(lower)) cells.push(false);
+    else if (/^\d+$/.test(token)) cells.push(Number(token));
     else errors.push(`无法识别：${rawLine.slice(0, 40)}`);
   }
   return finish(cells, data, errors);
@@ -349,15 +377,20 @@ function finish(cells, data, errors) {
   };
 }
 
-/** Blanks make every scale unscorable, so fill them with a deterministic guess. */
+/** Blanks make every scale unscorable, so fill them with a deterministic guess.
+ *  TF 题仍随机布尔；多级量表按该格式的级别数随机取一个级别。 */
 export function fillUnknown(answers, options = {}) {
   const { seed = 1, data = MMPI2_DATA } = options;
   let state = seed >>> 0 || 1;
+  const rng = () => {
+    state = (state * 1103515245 + 12345) % 2147483647;
+    return state / 2147483647;
+  };
   const out = answers.slice();
   for (let i = 0; i < out.length; i += 1) {
     if (out[i] === null || out[i] === undefined) {
-      state = (state * 1103515245 + 12345) % 2147483647;
-      out[i] = (state >>> 16) % 2 === 1;
+      const L = levelCount(itemFormatDesc(data, i + 1));
+      out[i] = L <= 2 ? (rng() < 0.5) : Math.floor(rng() * L);
     }
   }
   return out;
