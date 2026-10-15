@@ -305,6 +305,11 @@ function escapeAttr(text) {
   return String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
 
+/** Same idea, but for element content rather than an attribute value. */
+function escapeHtml(text) {
+  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 /** Human-readable count of how many answer sheets realise the profile. */
 export function combinationLabel(n) {
   if (n === 0) return '唯一解（无自由题）';
@@ -636,6 +641,7 @@ function runPlan({ newSeed = false } = {}) {
     renderTargetTable(plan);
     renderProfile(plan.profile);
     renderAnswers(plan);
+    renderItemBank();
     dom.results.hidden = false;
     refreshSolveButton();
   }, 30);
@@ -726,9 +732,19 @@ function renderProfile(profile) {
   dom.profile.innerHTML = html;
 }
 
+/** The question text to show in a grid cell, following the 题干语言 picker. */
+function questionHtml(text, lang) {
+  if (lang === 'en') return escapeHtml(text.en);
+  if (lang === 'both') {
+    return `${escapeHtml(text.zh)}<span class="en">${escapeHtml(text.en)}</span>`;
+  }
+  return escapeHtml(text.zh);
+}
+
 function renderAnswers(plan) {
   const parts = [];
   const showText = dom.showText ? dom.showText.checked : false;
+  const lang = dom.textLang ? dom.textLang.value : 'zh';
   for (let item = 1; item <= MMPI2_DATA.nItems; item += 1) {
     const free = state.freedom[item];
     const answer = state.answers[item - 1] ? 'T' : 'F';
@@ -743,13 +759,67 @@ function renderAnswers(plan) {
       `<div class="cell ${free ? 'free' : 'locked'} ${answer === 'T' ? 'is-t' : 'is-f'}"` +
         ` data-item="${item}" title="${escapeAttr(title)}">` +
         `<span class="n">${item}</span><b>${answer}</b>` +
-        (showText ? `<span class="q">${escapeAttr(text.zh)}</span>` : '') +
+        (showText ? `<span class="q">${questionHtml(text, lang)}</span>` : '') +
         '</div>'
     );
   }
   dom.answers.innerHTML = parts.join('');
   dom.answers.classList.toggle('with-text', showText);
   dom.freeCount.textContent = `自由题 ${plan.freeItems.length} 道 · ${combinationLabel(plan.freeItems.length)}`;
+}
+
+/**
+ * The whole 567-item bank: original English wording, Chinese translation, the
+ * answer the current sheet gives and whether that item is free or locked.
+ * Also works before solving -- then the last two columns stay blank.
+ */
+function renderItemBank() {
+  if (!dom.bankTable) return;
+  const total = MMPI2_DATA.nItems;
+  const filter = dom.bankFilter ? dom.bankFilter.value : 'all';
+  const plan = state.plan;
+
+  if (filter !== 'all' && !plan) {
+    dom.bankTable.innerHTML =
+      '<tbody><tr><td class="dim">先生成答卷，才能按回答或锁定状态筛选题目。</td></tr></tbody>';
+    if (dom.bankCount) dom.bankCount.textContent = `显示 0 / ${total} 题`;
+    return;
+  }
+
+  const needle = (dom.bankSearch.value || '').trim().toLowerCase();
+  const rows = [];
+  let shown = 0;
+  for (let item = 1; item <= total; item += 1) {
+    const text = itemText(item);
+    if (needle &&
+        String(item) !== needle &&
+        !text.en.toLowerCase().includes(needle) &&
+        !text.zh.toLowerCase().includes(needle)) continue;
+    const answer = state.answers ? (state.answers[item - 1] ? 'T' : 'F') : null;
+    const free = plan ? !!state.freedom[item] : null;
+    if (filter === 'free' && !free) continue;
+    if (filter === 'locked' && free !== false) continue;
+    if (filter === 't' && answer !== 'T') continue;
+    if (filter === 'f' && answer !== 'F') continue;
+    shown += 1;
+    rows.push(
+      `<tr data-item="${item}" class="${free === false ? 'locked' : ''}">` +
+      `<td class="n">${item}</td>` +
+      `<td class="orig">${escapeHtml(text.en)}</td>` +
+      `<td class="zh">${escapeHtml(text.zh)}</td>` +
+      `<td class="ans ${answer === null ? 'dim' : answer === 'T' ? 'is-t' : 'is-f'}">${answer || '—'}</td>` +
+      `<td class="st ${free === null ? 'dim' : free ? 'free' : 'locked'}">` +
+      `${free === null ? '—' : free ? '自由' : '锁定'}</td>` +
+      '</tr>'
+    );
+  }
+  dom.bankTable.innerHTML =
+    '<thead><tr><th>题号</th><th>英文原文</th><th>中文</th><th>回答</th><th>状态</th></tr></thead>' +
+    `<tbody>${rows.join('')}</tbody>`;
+  if (dom.bankCount) {
+    dom.bankCount.textContent = `显示 ${shown} / ${total} 题` +
+      (plan ? '' : '（生成答卷后可看回答与锁定状态）');
+  }
 }
 
 function onAnswerClick(event) {
@@ -767,6 +837,7 @@ function onAnswerClick(event) {
       correctInconsistency: state.correctInconsistency,
     }).byName
   );
+  renderItemBank();
 }
 
 /* -- actions -------------------------------------------------------- */
@@ -867,6 +938,7 @@ function invalidate(message) {
   dom.results.hidden = true;
   dom.status.textContent = message;
   dom.status.className = 'status';
+  renderItemBank();
   refreshSolveButton();
 }
 
@@ -897,6 +969,7 @@ function wire() {
     state.seed = (state.seed * 1103515245 + 12345) % 2147483647;
     state.answers = randomizeFree(state.answers, state.plan.freeItems, state.seed);
     renderAnswers(state.plan);
+    renderItemBank();
     renderProfile(
       scoreAnswers(state.answers, {
         isMale: state.isMale,
@@ -976,6 +1049,15 @@ function wire() {
       if (state.plan) renderAnswers(state.plan);
     });
   }
+  if (dom.textLang) {
+    dom.textLang.addEventListener('change', () => {
+      if (state.plan) renderAnswers(state.plan);
+    });
+  }
+  if (dom.bankSearch) {
+    dom.bankSearch.addEventListener('input', renderItemBank);
+    dom.bankFilter.addEventListener('change', renderItemBank);
+  }
 }
 
 export function init() {
@@ -985,6 +1067,7 @@ export function init() {
     'target-table', 'profile', 'answers', 'free-count', 'show-text',
     'export-contents', 'export-format', 'export-english', 'export-run-panel',
     'import-text', 'import-file', 'import-score', 'import-target', 'import-note',
+    'text-lang', 'bank-search', 'bank-filter', 'bank-table', 'bank-count',
   ];
   dom = {};
   for (const id of ids) {
@@ -994,6 +1077,7 @@ export function init() {
   dom.results.hidden = true;
   buildScaleList();
   buildExportPanel();
+  renderItemBank();
   wire();
   refreshSolveButton();
 }

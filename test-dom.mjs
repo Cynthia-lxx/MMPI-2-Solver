@@ -76,8 +76,57 @@ check(free.length + locked.length === 567, '每道题都被标为自由或锁定
 check(locked.length > 0 && locked.length < 100, 'Hs 的锁定题数量合理', `${locked.length}`);
 check($('free-count').textContent.includes('组合'), '显示组合数', JSON.stringify($('free-count').textContent));
 
+/* 题干语言 ----------------------------------------------------------- */
+$('show-text').checked = true;
+$('show-text').dispatchEvent(new window.Event('change'));
+$('text-lang').value = 'en';
+$('text-lang').dispatchEvent(new window.Event('change'));
+check(
+  $('answers').querySelector('.cell .q').textContent === 'I like mechanics magazines.',
+  '题干语言选英文时网格显示原文',
+  JSON.stringify($('answers').querySelector('.cell .q').textContent)
+);
+$('text-lang').value = 'both';
+$('text-lang').dispatchEvent(new window.Event('change'));
+const bothCell = $('answers').querySelector('.cell .q');
+check(
+  bothCell.textContent.includes('I like mechanics magazines.') && bothCell.querySelector('.en'),
+  '题干语言选中英对照时两行都在'
+);
+
+/* 题库面板 ----------------------------------------------------------- */
+const bankRows = [...$('bank-table').querySelectorAll('tbody tr')];
+check(bankRows.length === 567, '题库渲染 567 行', `${bankRows.length}`);
+check(
+  bankRows[0].querySelector('td.orig').textContent === 'I like mechanics magazines.',
+  '题库首题是英文原文',
+  JSON.stringify(bankRows[0].querySelector('td.orig').textContent)
+);
+check(bankRows[0].querySelector('td.zh').textContent.length > 4, '题库行带中文译文');
+check(/^[TF]$/.test(bankRows[0].querySelector('td.ans').textContent), '题库行带当前回答');
+check($('bank-count').textContent.includes('567'), '题库计数正确', JSON.stringify($('bank-count').textContent));
+
+$('bank-search').value = 'mechanics';
+$('bank-search').dispatchEvent(new window.Event('input'));
+const hits = [...$('bank-table').querySelectorAll('tbody tr')];
+check(
+  hits.length > 0 && hits.every((r) => r.querySelector('td.orig').textContent.toLowerCase().includes('mechanics')),
+  '题库搜索只留命中行',
+  `${hits.length} 行`
+);
+$('bank-search').value = '';
+$('bank-search').dispatchEvent(new window.Event('input'));
+
+$('bank-filter').value = 'locked';
+$('bank-filter').dispatchEvent(new window.Event('change'));
+const lockedRows = $('bank-table').querySelectorAll('tbody tr').length;
+check(lockedRows === locked.length, '筛选锁定题与网格一致', `${lockedRows} vs ${locked.length}`);
+$('bank-filter').value = 'all';
+$('bank-filter').dispatchEvent(new window.Event('change'));
+
 /* flipping a free item ------------------------------------------------ */
-const cell = free[0];
+// the 题干语言 switches above rebuilt the grid, so re-query instead of reusing `free`
+const cell = $('answers').querySelector('.cell.free');
 const before = cell.querySelector('b').textContent;
 cell.dispatchEvent(new window.Event('click', { bubbles: true }));
 check(cell.querySelector('b').textContent !== before, '点击自由题可切换', `${before} -> ${cell.querySelector('b').textContent}`);

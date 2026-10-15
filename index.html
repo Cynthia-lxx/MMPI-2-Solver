@@ -145,6 +145,24 @@
   .cell .q { font-size: 11px; line-height: 1.45; color: #3c4450; }
   td.dim { color: var(--muted); }
   td.hot { color: #c0392b; font-weight: 600; }
+  /* 题库：567 题原文一览 */
+  .panel.wide { grid-column: 1 / -1; }
+  .bank-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }
+  .bank-controls input[type=search] { flex: 1 1 240px; min-width: 170px; }
+  .bank-controls .hint { margin: 0; }
+  .bank-wrap { max-height: 480px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+  .bank-wrap table { font-size: 12.5px; }
+  .bank-wrap thead th { position: sticky; top: 0; background: #f7f8fa; z-index: 1; }
+  .bank-wrap td.n { width: 52px; color: var(--muted); }
+  .bank-wrap td.orig { width: 38%; }
+  .bank-wrap td.zh { width: 30%; }
+  .bank-wrap td.ans, .bank-wrap td.st { width: 66px; text-align: center; }
+  .bank-wrap td.ans.is-t { color: var(--accent); font-weight: 600; }
+  .bank-wrap td.ans.is-f { color: #9aa2ad; }
+  .bank-wrap td.st.free { color: var(--free); }
+  .bank-wrap td.st.locked { color: var(--bad); }
+  .bank-wrap tr.locked td.orig { opacity: .78; }
+  .cell .q .en { display: block; color: var(--muted); font-size: 10.5px; }
 </style>
 </head>
 <body>
@@ -171,6 +189,13 @@
     </select>
   </label>
   <label class="check"><input id="show-text" type="checkbox"> 显示题干</label>
+  <label>题干语言
+    <select id="text-lang">
+      <option value="zh">中文</option>
+      <option value="en">英文原文</option>
+      <option value="both" selected>中英对照</option>
+    </select>
+  </label>
   <span class="spacer"></span>
   <button id="example">载入示例</button>
   <button id="clear">清空</button>
@@ -242,6 +267,29 @@
         实线框为锁定题，翻转会破坏目标（悬停可看它影响哪些量表）。</p>
       <div id="answers" class="grid"></div>
     </div>
+  </section>
+
+  <section class="panel wide">
+    <h2>题库（567 题原文）</h2>
+    <div class="bank-controls">
+      <input id="bank-search" type="search" placeholder="搜索题号或题干（中文 / 英文均可）">
+      <label>筛选
+        <select id="bank-filter">
+          <option value="all">全部</option>
+          <option value="free">只看自由题</option>
+          <option value="locked">只看锁定题</option>
+          <option value="t">只看作答「是」</option>
+          <option value="f">只看作答「否」</option>
+        </select>
+      </label>
+      <span class="spacer"></span>
+      <span id="bank-count" class="hint"></span>
+    </div>
+    <div class="bank-wrap">
+      <table id="bank-table"></table>
+    </div>
+    <p class="hint">英文为 MMPI-2 原题措辞，中文为通行译本。「回答 / 状态」两列在生成答卷后才有值；
+      未求解时它只是一份可检索的题库。</p>
   </section>
 </main>
 
