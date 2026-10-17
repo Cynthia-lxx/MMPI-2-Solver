@@ -57,6 +57,18 @@ setScale('mbti93');
 await gui.mbtiReady;
 await wait(50);
 
+/* 0b. Branding: title tracks the scale short name; top brand strip + footer credits exist. */
+setScale('mbti16p28');
+await wait(50);
+check(document.title === 'PsychoInverse · 量表反算器 | MBTI-28', 'title tracks the scale short name', document.title);
+const slogan = document.querySelector('.brandbar .brandbar-slogan');
+check(!!slogan && slogan.textContent.trim() === '手撕所有心理学量表！', 'top brand strip shows the slogan');
+const credits = document.querySelector('footer.credits');
+check(!!credits, 'footer credits exists');
+check(!!credits && credits.innerHTML.includes('https://github.com/Cynthia-lxx/PsychoInverse'), 'footer has the project repo link');
+check(!!credits && credits.innerHTML.includes('3924522420'), 'footer has the developer QQ');
+check(!!credits && credits.innerHTML.includes('wjz-space@outlook.com'), 'footer has the developer email');
+
 /* 1. 每个 MBTI 题本：切到 → 选 INTJ → 生成 → 检查格数与达成状态 */
 for (const id of MBTI_IDS) {
   setScale(id);

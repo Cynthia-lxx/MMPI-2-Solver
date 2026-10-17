@@ -237,23 +237,30 @@ async function ensureMbti() {
 
 /** 量表注册表：加一个新量表 = 在这里加一行 + 一个数据模块 + 下拉里加一个 option。 */
 const SCALES = {
-  mmpi2: { id: 'mmpi2', label: 'MMPI-2 明尼苏达多项人格测验', binary: true, data: MMPI2_DATA },
-  scl90: { id: 'scl90', label: 'SCL-90 症状自评量表', binary: false, data: SCL90_DATA },
-  phq9: { id: 'phq9', label: 'PHQ-9 抑郁症筛查量表', binary: false, data: PHQ9_DATA },
-  gad7: { id: 'gad7', label: 'GAD-7 焦虑筛查量表', binary: false, data: GAD7_DATA },
-  hads: { id: 'hads', label: 'HADS 焦虑抑郁量表', binary: false, data: HADS_DATA },
-  who5: { id: 'who5', label: 'WHO-5 主观幸福感量表', binary: false, data: WHO5_DATA },
-  mbti93: { id: 'mbti93', label: 'MBTI 职业性格测试（93 题）', typology: true, data: null },
-  mbti16p28: { id: 'mbti16p_quick', label: '16personalities 快速版（28 题）', typology: true, data: null },
-  mbti16p93: { id: 'mbti16p_standard', label: '16personalities 标准版（93 题）', typology: true, data: null },
-  mbti16p200: { id: 'mbti16p_full', label: '16personalities 完整版（200 题）', typology: true, data: null },
-  mbti200md: { id: 'mbti200md', label: 'MBTI 200 题（权威完整版）', typology: true, data: null },
-  mbti16p60: { id: 'mbti16p60', label: '16personalities 60 题（KNN 数据集）', typology: true, data: null },
+  mmpi2: { id: 'mmpi2', short: 'MMPI-2', label: 'MMPI-2 明尼苏达多项人格测验', binary: true, data: MMPI2_DATA },
+  scl90: { id: 'scl90', short: 'SCL-90', label: 'SCL-90 症状自评量表', binary: false, data: SCL90_DATA },
+  phq9: { id: 'phq9', short: 'PHQ-9', label: 'PHQ-9 抑郁症筛查量表', binary: false, data: PHQ9_DATA },
+  gad7: { id: 'gad7', short: 'GAD-7', label: 'GAD-7 焦虑筛查量表', binary: false, data: GAD7_DATA },
+  hads: { id: 'hads', short: 'HADS', label: 'HADS 焦虑抑郁量表', binary: false, data: HADS_DATA },
+  who5: { id: 'who5', short: 'WHO-5', label: 'WHO-5 主观幸福感量表', binary: false, data: WHO5_DATA },
+  mbti93: { id: 'mbti93', short: 'MBTI-93', label: 'MBTI 职业性格测试（93 题）', typology: true, data: null },
+  mbti16p28: { id: 'mbti16p_quick', short: 'MBTI-28', label: '16personalities 快速版（28 题）', typology: true, data: null },
+  mbti16p93: { id: 'mbti16p_standard', short: '16P-93', label: '16personalities 标准版（93 题）', typology: true, data: null },
+  mbti16p200: { id: 'mbti16p_full', short: '16P-200', label: '16personalities 完整版（200 题）', typology: true, data: null },
+  mbti200md: { id: 'mbti200md', short: 'MBTI-200MD', label: 'MBTI 200 题（权威完整版）', typology: true, data: null },
+  mbti16p60: { id: 'mbti16p60', short: '16P-60', label: '16personalities 60 题（KNN 数据集）', typology: true, data: null },
 };
 
 /** 当前量表的元数据。 */
 function scaleMeta() {
   return SCALES[state.scale] || SCALES.mmpi2;
+}
+
+/** Keep the browser tab title in sync with the active scale (brand + scale short name). */
+function updateDocTitle() {
+  const meta = scaleMeta();
+  const short = (meta && (meta.short || meta.label)) || 'MMPI-2';
+  document.title = `PsychoInverse · 量表反算器 | ${short}`;
 }
 
 export { MMPI2_DATA };
@@ -2825,6 +2832,7 @@ async function switchScale(value) {
   state.scale = value;
   state.targets = {};
   document.body.setAttribute('data-scale', value);
+  updateDocTitle();
   const meta = SCALES[value];
   if (meta && meta.typology && !meta.data) {
     setNote('正在加载 MBTI 题本数据…');
@@ -2925,6 +2933,7 @@ export function init() {
     dom.scaleSwitch.value = state.scale;
     document.body.setAttribute('data-scale', state.scale);
   }
+  updateDocTitle();
   buildScaleList();
   buildExportPanel();
   applyScaleCopy();
