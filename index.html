@@ -7,18 +7,19 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8D%A5%3C/text%3E%3C/svg%3E">
 <style>
   :root {
-    --bg: #f5f6f8;
+    --bg: #f4f6fa;
     --panel: #ffffff;
-    --line: #e3e6ea;
-    --ink: #1c2330;
-    --muted: #6b7481;
-    --accent: #5b7fa6;
-    --ok: #4a8f78;
-    --ok-bg: #e8f3ef;
-    --bad: #c0695f;
-    --bad-bg: #fbeee9;
-    --free: #8a7bb0;
-    --warn: #b8893f;
+    --line: #e6e9f1;
+    --ink: #1b2330;
+    --muted: #69738a;
+    --accent: #2f6fb3;            /* 仿 MtF.wiki 品牌蓝 */
+    --accent-soft: #eef4fb;
+    --ok: #3f9b78;
+    --ok-bg: #e9f5ef;
+    --bad: #cf6f6a;
+    --bad-bg: #fbeeee;
+    --free: #c98aa6;              /* MtF 柔和玫瑰粉 */
+    --warn: #c7903f;
     /* MBTI 四维度低饱和对立色（非彩虹顺序） */
     --mbti-e: #c98a6b;
     --mbti-i: #8190a8;
@@ -30,32 +31,33 @@
     --mbti-p: #7fa0a0;
     /* 派生面：输入框、单元格、代码块等，深浅色各自覆盖 */
     --input-bg: #ffffff;
-    --cell-bg: #fbfbfc;
-    --code-bg: #eef1f5;
-    --targeted-bg: #f4f8ff;
-    --free-bg: #fbfaff;
-    --free-hover: #f1ecfb;
-    --slack-bg: #f3f7ff;
-    --slack-hover: #e6effd;
-    --chip-bg: #f1ecfb;
-    --th-bg: #f7f8fa;
-    --q-ink: #3c4450;
-    --busy-bg: #e8eefc;
+    --cell-bg: #fbfcfe;
+    --code-bg: #eef1f7;
+    --targeted-bg: #eef4fb;
+    --free-bg: #fbeef3;
+    --free-hover: #f6e3ec;
+    --slack-bg: #eef4fb;
+    --slack-hover: #e0ecfa;
+    --chip-bg: #f6eef4;
+    --th-bg: #f6f8fc;
+    --q-ink: #3a4456;
+    --busy-bg: #e8f0fa;
   }
   /* 深色模式：由 <html data-theme="dark"> 驱动，首次访问跟随系统偏好 */
   :root[data-theme="dark"] {
-    --bg: #0f1320;
-    --panel: #1a2030;
-    --line: #2a3346;
-    --ink: #e6e9f0;
-    --muted: #98a2b3;
-    --accent: #7fa3c4;
-    --ok: #5fae93;
-    --ok-bg: #142a24;
-    --bad: #d98a82;
-    --bad-bg: #2e1c1a;
-    --free: #a892d0;
-    --warn: #d2a866;
+    --bg: #0f1422;
+    --panel: #171d2e;
+    --line: #283044;
+    --ink: #e7eaf2;
+    --muted: #98a2b8;
+    --accent: #5b93d4;
+    --accent-soft: #16223a;
+    --ok: #5fb296;
+    --ok-bg: #13271f;
+    --bad: #e09a94;
+    --bad-bg: #2c1a1a;
+    --free: #d29ab4;
+    --warn: #d6a866;
     --mbti-e: #d6a488;
     --mbti-i: #97a3bc;
     --mbti-s: #aeb892;
@@ -68,11 +70,11 @@
     --cell-bg: #161d2c;
     --code-bg: #1c2333;
     --targeted-bg: #16223a;
-    --free-bg: #1a1530;
-    --free-hover: #241a3f;
+    --free-bg: #241726;
+    --free-hover: #2e1c2a;
     --slack-bg: #14233f;
     --slack-hover: #1b2f54;
-    --chip-bg: #241a3f;
+    --chip-bg: #2a1a28;
     --th-bg: #161d2c;
     --q-ink: #c3c9d6;
     --busy-bg: #16223a;
@@ -82,11 +84,12 @@
     margin: 0;
     background: var(--bg);
     color: var(--ink);
-    font: 14px/1.55 "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    font: 14px/1.6 "LXGW Clear Gothic", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
   header {
     padding: 18px 24px 14px;
     background: var(--panel);
+    border-top: 3px solid var(--accent);
     border-bottom: 1px solid var(--line);
   }
   header h1 { margin: 0; font-size: 19px; font-weight: 650; }
