@@ -54,6 +54,18 @@ import { GAD7_DATA } from './gad7.data.js';
 import { HADS_DATA } from './hads.data.js';
 import { WHO5_DATA } from './who5.data.js';
 
+// MBTI 类型学题本（93 / 16personalities 28·93·200 / 200题md / 60题KNN 数据集）
+import { MBTI93_DATA } from './mbti_93.data.js';
+import { MBTI16P_QUICK_DATA } from './mbti_16p_quick.data.js';
+import { MBTI16P_STANDARD_DATA } from './mbti_16p_standard.data.js';
+import { MBTI16P_FULL_DATA } from './mbti_16p_full.data.js';
+import { MBTI200MD_DATA } from './mbti_200md.data.js';
+import { MBTI16P60_DATA } from './mbti_16p60.data.js';
+import {
+  mbtiScore, mbtiSolve, mbtiScoreKnn, mbtiParseAnswers, mbtiExportCsv,
+} from './mbti.js';
+import { MBTI_TYPES_16 } from './mbti_types.js';
+
 /** 量表注册表：加一个新量表 = 在这里加一行 + 一个数据模块 + 下拉里加一个 option。 */
 const SCALES = {
   mmpi2: { id: 'mmpi2', label: 'MMPI-2 明尼苏达多项人格测验', binary: true, data: MMPI2_DATA },
@@ -62,6 +74,12 @@ const SCALES = {
   gad7: { id: 'gad7', label: 'GAD-7 焦虑筛查量表', binary: false, data: GAD7_DATA },
   hads: { id: 'hads', label: 'HADS 焦虑抑郁量表', binary: false, data: HADS_DATA },
   who5: { id: 'who5', label: 'WHO-5 主观幸福感量表', binary: false, data: WHO5_DATA },
+  mbti93: { id: 'mbti93', label: 'MBTI 职业性格测试（93 题）', typology: true, data: MBTI93_DATA },
+  mbti16p28: { id: 'mbti16p_quick', label: '16personalities 快速版（28 题）', typology: true, data: MBTI16P_QUICK_DATA },
+  mbti16p93: { id: 'mbti16p_standard', label: '16personalities 标准版（93 题）', typology: true, data: MBTI16P_STANDARD_DATA },
+  mbti16p200: { id: 'mbti16p_full', label: '16personalities 完整版（200 题）', typology: true, data: MBTI16P_FULL_DATA },
+  mbti200md: { id: 'mbti200md', label: 'MBTI 200 题（权威完整版）', typology: true, data: MBTI200MD_DATA },
+  mbti16p60: { id: 'mbti16p60', label: '16personalities 60 题（KNN 数据集）', typology: true, data: MBTI16P60_DATA },
 };
 
 /** 当前量表的元数据。 */
@@ -656,6 +674,12 @@ function currentData() {
 }
 const isBinary = () => scaleMeta().binary;
 const isScl90 = () => state.scale === 'scl90';
+const isTypology = () => !!scaleMeta().typology;
+
+/** MBTI 八字母中文释义（用于维度标注与结果展示）。 */
+const LETTER_CN = {
+  E: '外向', I: '内向', S: '实感', N: '直觉', T: '思考', F: '情感', J: '判断', P: '知觉',
+};
 
 let dom = {};
 
@@ -792,6 +816,7 @@ function modeEdges(mode) {
 }
 
 function buildScaleList() {
+  if (isTypology()) return buildTypologyTarget();
   if (!isBinary()) return buildLikertScaleList();
   const byFamily = new Map(FAMILY_ORDER.map((f) => [f, []]));
   for (const option of optionsFor(state.isMale, state.correctInconsistency)) {
@@ -995,7 +1020,10 @@ function applySearch() {
 /* -- results -------------------------------------------------------- */
 
 function refreshSolveButton() {
-  dom.solve.disabled = Object.keys(state.targets).length === 0;
+  const hasTargets = isTypology()
+    ? currentData().scales.every((sc) => state.targets[sc.name])
+    : Object.keys(state.targets).length > 0;
+  dom.solve.disabled = !hasTargets;
   dom.again.disabled = !state.plan;
   dom.shuffle.disabled = !state.plan;
   dom.copy.disabled = !state.answers;
@@ -1008,6 +1036,10 @@ function setNote(text) {
 }
 
 function runPlan({ newSeed = false } = {}) {
+  if (isTypology()) {
+    runTypologyPlan();
+    return;
+  }
   const targets = collectTargets();
   if (!Object.keys(targets).length) {
     setNote(
@@ -1360,6 +1392,7 @@ function onSliderKey(event) {
 }
 
 function renderAnswers(plan) {
+  if (isTypology()) return renderTypologyAnswers(plan);
   const parts = [];
   const showText = dom.showText ? dom.showText.checked : false;
   const lang = dom.textLang ? dom.textLang.value : 'zh';
@@ -1468,17 +1501,25 @@ function renderItemBank() {
   const rows = [];
   let shown = 0;
   for (let item = 1; item <= total; item += 1) {
-    const text = itemText(item, currentData());
+    const text = isTypology()
+      ? {
+          zh: (currentData().items.zh && currentData().items.zh[item - 1]) || '',
+          en: (currentData().items.en && currentData().items.en[item - 1]) || '',
+          topic: null,
+        }
+      : itemText(item, currentData());
     if (needle &&
         String(item) !== needle &&
         !(text.en || '').toLowerCase().includes(needle) &&
         !text.zh.toLowerCase().includes(needle)) continue;
     const answer = state.answers
-      ? (!isBinary() ? levelScore(currentData(), state.answers[item - 1]) : (state.answers[item - 1] ? 'T' : 'F'))
+      ? (isTypology()
+          ? (state.answers[item - 1] ? currentData().itemOptions[item - 1][1] : currentData().itemOptions[item - 1][0])
+          : (!isBinary() ? levelScore(currentData(), state.answers[item - 1]) : (state.answers[item - 1] ? 'T' : 'F')))
       : null;
     const bound = plan && !isBinary() && plan.itemBounds ? plan.itemBounds[item] : null;
     const free = plan
-      ? (!isBinary() ? (bound ? bound.lo < bound.hi : true) : !!state.freedom[item])
+      ? (isTypology() ? null : (!isBinary() ? (bound ? bound.lo < bound.hi : true) : !!state.freedom[item]))
       : null;
     if (filter === 'free' && !free) continue;
     if (filter === 'locked' && free !== false) continue;
@@ -1544,6 +1585,21 @@ function onAnswerClick(event) {
       }).byName);
       renderItemBank();
     }
+    return;
+  }
+  if (isTypology()) {
+    const item = Number(cell.dataset.item);
+    state.answers[item - 1] = state.answers[item - 1] ? 0 : 1;
+    const data = currentData();
+    const scores = data.samples ? mbtiScoreKnn(data, state.answers) : mbtiScore(data, state.answers);
+    state.plan.scores = scores;
+    state.plan.profile = scores;
+    state.plan.type = scores.type;
+    state.plan.dims = scores.dims;
+    state.plan.fromSample = false;
+    renderTypologyProfile(state.plan);
+    renderTypologyAnswers(state.plan);
+    renderItemBank();
     return;
   }
   if (!isBinary()) return; // 多级量表只认级别按钮
@@ -1672,6 +1728,13 @@ function downloadBytes(filename, bytes, mime) {
 
 function buildExportPanel() {
   if (!dom.exportContents) return;
+  if (isTypology()) {
+    dom.exportContents.innerHTML =
+      `<label class="check"><input type="checkbox" data-content="answers" checked>答题表（题号 / 所选字母 / 题面）</label>` +
+      `<label class="check"><input type="checkbox" data-content="profile">类型与维度剖面</label>`;
+    dom.exportFormat.innerHTML = '<option value="csv">CSV</option>';
+    return;
+  }
   const items = !isBinary()
     ? [
         { id: 'answers', label: '答题表（90 题 × 题干 / 得分 / 程度）' },
@@ -1698,6 +1761,16 @@ function buildExportPanel() {
  */
 function applyScaleCopy() {
   if (!dom.importText) return;
+  if (isTypology()) {
+    const data = currentData();
+    dom.importText.placeholder =
+      `粘贴 ${data.nItems} 位作答串（A/B、0/1、T/F 均可）`;
+    if (dom.importHint) {
+      dom.importHint.textContent =
+        '评分只算类型，不求解。未作答的题按 0（A）计；共 ' + data.nItems + ' 题。';
+    }
+    return;
+  }
   const data = currentData();
   const desc = itemFormatDesc(data, 1);
   if (desc.type === 'binary') {
@@ -1720,6 +1793,16 @@ function applyScaleCopy() {
 }
 
 function runExport() {
+  if (isTypology()) {
+    if (!state.answers) {
+      setNote('请先生成或导入一份答卷。');
+      return;
+    }
+    const csv = mbtiExportCsv(currentData(), state.answers);
+    download(`${state.scale}-export.csv`, csv, 'text/csv;charset=utf-8');
+    setNote(`已导出 ${state.scale}-export.csv。`);
+    return;
+  }
   if (!isBinary()) {
     if (!state.answers) {
       setNote(`请先生成或导入一份 ${scaleMeta().label} 答卷。`);
@@ -1776,6 +1859,30 @@ function runExport() {
 
 /** Score answers pasted in from a real protocol, without solving anything. */
 function runImport() {
+  if (isTypology()) {
+    const data = currentData();
+    const raw = dom.importText.value || '';
+    const parsed = mbtiParseAnswers(data, raw);
+    const found = String(raw).replace(/\s/g, '').split('').filter((c) => /[0-1ABab]/i.test(c)).length;
+    if (found === 0) {
+      setNote(`没读到答案：支持 ${data.nItems} 位作答串（A/B、0/1、T/F 均可）。`);
+      return;
+    }
+    const answers = parsed;
+    const scores = data.samples ? mbtiScoreKnn(data, answers) : mbtiScore(data, answers);
+    const plan = makeTypologyPlan(data, answers, scores, false);
+    state.plan = plan;
+    state.answers = answers.slice();
+    state.freedom = plan.freedom;
+    state.slack = plan.slack;
+    dom.results.hidden = false;
+    renderTypologyProfile(plan);
+    renderTypologyAnswers(plan);
+    renderItemBank();
+    dom.importNote.textContent = `已读入 ${found} / ${data.nItems} 题`;
+    setNote(`已读入 ${found} / ${data.nItems} 题。`);
+    return;
+  }
   if (!isBinary()) {
     const data = currentData();
     const parsed = likertParseAnswers(data, dom.importText.value);
@@ -1951,6 +2058,17 @@ function wire() {
 
   dom.copy.addEventListener('click', async () => {
     if (!state.answers) return;
+    if (isTypology()) {
+      const data = currentData();
+      const text = state.answers.map((a, i) => data.itemOptions[i][a ? 1 : 0]).join('');
+      try {
+        await navigator.clipboard.writeText(text);
+        setNote(`已复制 ${text.length} 位作答串（每题所选字母）到剪贴板。`);
+      } catch {
+        setNote('复制失败，请手动选择：' + text.slice(0, 80) + '…');
+      }
+      return;
+    }
     if (!isBinary()) {
       const data = currentData();
       const text = state.answers.map((l) => String(levelScore(data, l))).join('');
@@ -1973,6 +2091,11 @@ function wire() {
 
   dom.csv.addEventListener('click', () => {
     if (!state.answers) return;
+    if (isTypology()) {
+      const csv = mbtiExportCsv(currentData(), state.answers);
+      download(`${state.scale}-answers.csv`, csv, 'text/csv;charset=utf-8');
+      return;
+    }
     if (!isBinary()) {
       const data = currentData();
       const csv = likertExportCsv(data, state.answers);
@@ -2227,6 +2350,10 @@ function switchScale(value) {
   state.scale = value;
   state.targets = {};
   document.body.setAttribute('data-scale', value);
+  const targetTable = dom.targetTable;
+  if (targetTable) targetTable.hidden = isTypology();
+  const hTargetEl = document.getElementById('h-target');
+  if (hTargetEl) hTargetEl.hidden = isTypology();
   const h1 = document.querySelector('header h1');
   const hp = document.querySelector('header p');
   const panel = dom.scaleList.closest('.panel');
@@ -2244,6 +2371,17 @@ function switchScale(value) {
     if (hBank) hBank.textContent = '题库（567 题原文）';
     if (summaryProfile) summaryProfile.textContent = '完整剖面（87 个量表，橙色 ≥ 65、红色 ≥ 80）';
     if (dom.copy) dom.copy.textContent = '复制 T/F';
+  } else if (isTypology()) {
+    const meta = scaleMeta();
+    if (h1) h1.textContent = meta.label;
+    if (hp) hp.textContent = meta.data.blurb || '选择目标人格类型，反推出一份能命中该类型的作答；或直接导入、编辑并评分。';
+    if (leftH2) leftH2.textContent = '目标人格类型';
+    if (hTarget) hTarget.textContent = '类型达成';
+    if (hAnswersLabel) hAnswersLabel.textContent = `${meta.data.nItems} 题回答`;
+    if (hBank) hBank.textContent = `题库（${meta.data.nItems} 题）`;
+    if (summaryProfile) summaryProfile.textContent = '类型与维度倾向';
+    if (dom.copy) dom.copy.textContent = '复制作答串';
+    setNote(`已切换到 ${meta.label}。选择目标类型后点「生成答卷」。`);
   } else if (state.scale === 'scl90') {
     if (h1) h1.textContent = 'SCL-90 自评量表';
     if (hp) hp.textContent = '选择各因子的目标严重度，反推出一份 90 题作答；或直接导入、编辑并评分。';
@@ -2296,8 +2434,8 @@ export function init() {
   dom.note.hidden = true;
   dom.results.hidden = true;
   if (dom.scaleSwitch) {
-    dom.scaleSwitch.innerHTML = Object.values(SCALES)
-      .map((s) => `<option value="${s.id}">${s.label}</option>`)
+    dom.scaleSwitch.innerHTML = Object.entries(SCALES)
+      .map(([k, s]) => `<option value="${k}">${s.label}</option>`)
       .join('');
     dom.scaleSwitch.value = state.scale;
     document.body.setAttribute('data-scale', state.scale);
@@ -2313,6 +2451,188 @@ export function init() {
 
 function camel(id) {
   return id.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+}
+
+/* -- MBTI typology（第四种范式：选定人格类型 → 反推作答） ---------------- */
+
+function makeTypologyPlan(data, answers, scores, fromSample) {
+  const n = data.nItems;
+  return {
+    scale: state.scale,
+    answers: answers.slice(),
+    target: { __type: scores.type },
+    requested: { __type: scores.type },
+    residual: {},
+    feasible: true,
+    fromSample: !!fromSample,
+    type: scores.type,
+    dims: scores.dims,
+    scores,
+    profile: scores,
+    freedom: new Array(n + 1).fill(true),
+    freeItems: [...Array(n).keys()].map((i) => i + 1),
+    itemBounds: null,
+    slack: new Array(n + 1).fill(false),
+    slackItems: [],
+    lockedItems: [],
+    lockReason: new Map(),
+    rawByName: {},
+  };
+}
+
+function buildTypologyTarget() {
+  const data = currentData();
+  const types = MBTI_TYPES_16 || [];
+  const typeOpts = types
+    .map((t) => `<option value="${t.id}">${t.id} · ${escapeHtml(t.name || '')}（${escapeHtml(t.category || '')}）</option>`)
+    .join('');
+  const dimPickers = data.scales
+    .map((sc) => {
+      const [a, b] = sc.pair;
+      const opts = [
+        `<option value="">—</option>`,
+        `<option value="${a}">${a} ${LETTER_CN[a] || ''}</option>`,
+        `<option value="${b}">${b} ${LETTER_CN[b] || ''}</option>`,
+      ];
+      if (sc.tieThreshold > 0) opts.push(`<option value="X">X 中间型</option>`);
+      return (
+        `<div class="row typ-row" data-dim="${sc.name}">` +
+        `<span class="abbr" title="${sc.name}">${sc.name}</span>` +
+        `<select data-dim="${sc.name}">${opts.join('')}</select>` +
+        `<span class="full">${LETTER_CN[a] || a} ↔ ${LETTER_CN[b] || b}</span></div>`
+      );
+    })
+    .join('');
+  dom.scaleList.innerHTML =
+    `<div class="rows typ-targets">` +
+    `<div class="typ-quick"><label>快捷类型</label><select id="typ-type">` +
+    `<option value="">— 选择 16 型 —</option>${typeOpts}</select></div>` +
+    dimPickers +
+    `</div>`;
+  const sel = dom.scaleList.querySelector('#typ-type');
+  if (sel) sel.addEventListener('change', onTypTypePicked);
+  for (const s of dom.scaleList.querySelectorAll('select[data-dim]')) {
+    s.value = state.targets[s.dataset.dim] || '';
+    s.addEventListener('change', onTypDimChanged);
+  }
+  applySearch();
+}
+
+function onTypTypePicked(event) {
+  const v = event.target.value;
+  if (!v) return;
+  const data = currentData();
+  data.scales.forEach((sc, i) => {
+    const ch = v[i];
+    const sel = dom.scaleList.querySelector(`select[data-dim="${sc.name}"]`);
+    if (sel) sel.value = ch;
+    state.targets[sc.name] = ch;
+  });
+  refreshSolveButton();
+}
+
+function onTypDimChanged(event) {
+  const dim = event.target.dataset.dim;
+  const v = event.target.value;
+  if (!v) delete state.targets[dim];
+  else state.targets[dim] = v;
+  const data = currentData();
+  const type = data.scales.map((sc) => state.targets[sc.name] || '').join('');
+  const quick = dom.scaleList.querySelector('#typ-type');
+  if (quick) quick.value = type.length === 4 && !type.includes('') ? type : '';
+  refreshSolveButton();
+}
+
+function runTypologyPlan() {
+  const data = currentData();
+  const type = data.scales.map((sc) => state.targets[sc.name] || '').join('');
+  if (type.length < 4) {
+    setNote('请为四个维度各选择一个字母（或选快捷类型）。');
+    return;
+  }
+  dom.status.textContent = '生成中…';
+  dom.status.className = 'status busy';
+  setTimeout(() => {
+    const started = Date.now();
+    const r = mbtiSolve(data, type, { rng: Math.random });
+    const answers = r.answers;
+    const scores = data.samples ? mbtiScoreKnn(data, answers) : mbtiScore(data, answers);
+    const plan = makeTypologyPlan(data, answers, scores, r.fromSample);
+    state.plan = plan;
+    state.answers = answers.slice();
+    state.freedom = plan.freedom;
+    state.slack = plan.slack;
+    dom.status.textContent = plan.feasible
+      ? `已生成答卷：为目标类型 ${plan.type} 反推出 ${data.nItems} 题作答${plan.fromSample ? '（取自真实样本库）' : ''}（耗时 ${Date.now() - started} ms）。`
+      : `反推未完全命中（得到 ${plan.type}，目标 ${plan.requested.__type || type}）。`;
+    dom.status.className = plan.feasible ? 'status ok' : 'status bad';
+    renderTypologyProfile(plan);
+    renderTypologyAnswers(plan);
+    renderItemBank();
+    dom.results.hidden = false;
+    refreshSolveButton();
+  }, 30);
+}
+
+function renderTypologyProfile(plan) {
+  const data = currentData();
+  const t = plan.type;
+  const tMeta = (MBTI_TYPES_16 || []).find((x) => x.id === t) || null;
+  const dimRows = data.scales
+    .map((sc) => {
+      const d = plan.dims[sc.name];
+      const A = sc.pair[0];
+      const B = sc.pair[1];
+      const letter = d.letter;
+      const isX = letter === 'X';
+      const aPct = d.total ? Math.round((d.a / d.total) * 100) : 50;
+      const bar = `<span class="bar"><span class="bar-fill dim-${letter.toLowerCase()}" style="width:${aPct}%"></span></span>`;
+      return (
+        `<tr${isX ? ' class="mid"' : ''}>` +
+        `<td class="abbr">${sc.name}</td>` +
+        `<td class="dim-${A.toLowerCase()}">${A} ${LETTER_CN[A] || ''}</td>` +
+        `<td class="dim-${B.toLowerCase()}">${B} ${LETTER_CN[B] || ''}</td>` +
+        `<td class="dim-${letter.toLowerCase()}">${letter}</td>` +
+        `<td>${bar}</td></tr>`
+      );
+    })
+    .join('');
+  const badge = `<span class="typ-badge dim-${t[0].toLowerCase()}">${t}</span>`;
+  const html =
+    `<div class="typ-result">` +
+    `<div class="typ-head">${badge}` +
+    `${tMeta ? `<span class="typ-name">${escapeHtml(tMeta.name || '')}</span>` : ''}` +
+    `${plan.fromSample ? '<span class="badge">真实样本</span>' : ''}</div>` +
+    (tMeta && tMeta.category ? `<div class="typ-cat">${escapeHtml(tMeta.category)}</div>` : '') +
+    `<table class="typ-dims"><tr><th>维度</th><th>左</th><th>右</th><th>类型</th><th>倾向</th></tr>${dimRows}</table>` +
+    `</div>`;
+  dom.profile.innerHTML = html;
+}
+
+function renderTypologyAnswers(plan) {
+  const data = currentData();
+  const parts = [];
+  const showText = dom.showText ? dom.showText.checked : false;
+  for (let item = 1; item <= data.nItems; item += 1) {
+    const ans = state.answers[item - 1] ? 1 : 0; // 0=A, 1=B
+    const [letterA, letterB] = data.itemOptions[item - 1];
+    const letter = ans === 0 ? letterA : letterB;
+    const stem = data.items.zh ? data.items.zh[item - 1] : '';
+    const aText = data.items.zhA ? data.items.zhA[item - 1] : '';
+    const bText = data.items.zhB ? data.items.zhB[item - 1] : '';
+    const q = ans === 0 ? aText : bText;
+    const title = [stem, `A：${aText}`, `B：${bText}`].filter(Boolean).join('\n');
+    parts.push(
+      `<div class="cell typ ${ans === 0 ? 'is-a' : 'is-b'} dim-${letter.toLowerCase()}"` +
+      ` data-item="${item}" title="${escapeAttr(title)}">` +
+      `<span class="n">${item}</span><b style="color:var(--mbti-${letter.toLowerCase()})">${letter}</b>` +
+      (showText ? `<span class="q">${escapeHtml(q)}</span>` : '') +
+      '</div>'
+    );
+  }
+  dom.answers.innerHTML = parts.join('');
+  dom.answers.classList.toggle('with-text', showText);
+  dom.freeCount.textContent = `${data.nItems} 题（点击切换 A/B）`;
 }
 
 if (typeof document !== 'undefined') {

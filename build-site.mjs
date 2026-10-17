@@ -20,6 +20,9 @@ const SOURCES = [
   'likert.js',
   'scl90.data.js', 'scl90.js',
   'phq9.data.js', 'gad7.data.js', 'hads.data.js', 'who5.data.js',
+  'mbti_93.data.js', 'mbti_16p_quick.data.js', 'mbti_16p_standard.data.js',
+  'mbti_16p_full.data.js', 'mbti_200md.data.js', 'mbti_16p60.data.js',
+  'mbti.js', 'mbti_types.js',
   'inverse.js', 'xlsx.js', 'sheet.js', 'gui.js',
 ];
 const SRC = 'index.src.html';

@@ -12,13 +12,22 @@
     --line: #e3e6ea;
     --ink: #1c2330;
     --muted: #6b7481;
-    --accent: #2f6feb;
-    --ok: #157f4a;
-    --ok-bg: #e8f6ee;
-    --bad: #b3261e;
-    --bad-bg: #fdecea;
-    --free: #7a5cc4;
-    --warn: #b26a00;
+    --accent: #5b7fa6;
+    --ok: #4a8f78;
+    --ok-bg: #e8f3ef;
+    --bad: #c0695f;
+    --bad-bg: #fbeee9;
+    --free: #8a7bb0;
+    --warn: #b8893f;
+    /* MBTI 四维度低饱和对立色（非彩虹顺序） */
+    --mbti-e: #c98a6b;
+    --mbti-i: #8190a8;
+    --mbti-s: #9aa585;
+    --mbti-n: #a394c4;
+    --mbti-t: #6e93a3;
+    --mbti-f: #c98fa0;
+    --mbti-j: #c2a267;
+    --mbti-p: #7fa0a0;
     /* 派生面：输入框、单元格、代码块等，深浅色各自覆盖 */
     --input-bg: #ffffff;
     --cell-bg: #fbfbfc;
@@ -40,13 +49,21 @@
     --line: #2a3346;
     --ink: #e6e9f0;
     --muted: #98a2b3;
-    --accent: #5b8bff;
-    --ok: #4cc38a;
-    --ok-bg: #142a20;
-    --bad: #ff6b61;
-    --bad-bg: #2e1816;
-    --free: #b79cf0;
-    --warn: #e0a64b;
+    --accent: #7fa3c4;
+    --ok: #5fae93;
+    --ok-bg: #142a24;
+    --bad: #d98a82;
+    --bad-bg: #2e1c1a;
+    --free: #a892d0;
+    --warn: #d2a866;
+    --mbti-e: #d6a488;
+    --mbti-i: #97a3bc;
+    --mbti-s: #aeb892;
+    --mbti-n: #b6a8d6;
+    --mbti-t: #86acbc;
+    --mbti-f: #d6a3b2;
+    --mbti-j: #d4b884;
+    --mbti-p: #93b3b3;
     --input-bg: #111726;
     --cell-bg: #161d2c;
     --code-bg: #1c2333;
@@ -320,13 +337,53 @@
   /* 切换到 SCL-90 时隐藏 MMPI-2 专属控件 */
   body:not([data-scale="mmpi2"]) .mmpi2-only { display: none !important; }
   body[data-scale="mmpi2"] .likert-only { display: none !important; }
+  body[data-scale^="mbti"] .likert-only { display: none !important; }
   .bank-wrap td.ans.is-lvl { color: var(--accent); font-weight: 600; }
   #profile table, #target-table table { width: 100%; border-collapse: collapse; font-size: 13px; }
   #profile th, #profile td, #target-table th, #target-table td {
     padding: 4px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top;
   }
-  #profile td.hot, #target-table td.hot { color: #c0392b; font-weight: 600; }
+  #profile td.hot, #target-table td.hot { color: var(--bad); font-weight: 600; }
   .cell.multi .lvl { min-width: 26px; }
+
+  /* MBTI typology：A/B 作答单元格 + 维度色（inline 已给字母着色，此处补基础与图表） */
+  .cell.typ { font-weight: 600; cursor: pointer; }
+  .cell.typ .n { font-weight: 400; }
+  .cell.typ:hover { border-color: var(--accent); }
+  .typ-targets .row.typ-row { grid-template-columns: 52px 1fr 1fr; align-items: center; }
+  .typ-quick { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .typ-quick select { flex: 1; min-width: 0; }
+  .typ-result { font-size: 13px; }
+  .typ-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .typ-badge { font-weight: 700; font-size: 16px; padding: 2px 10px; border-radius: 6px; color: #fff; }
+  .typ-badge.dim-e { background: var(--mbti-e); }
+  .typ-badge.dim-i { background: var(--mbti-i); }
+  .typ-badge.dim-s { background: var(--mbti-s); }
+  .typ-badge.dim-n { background: var(--mbti-n); }
+  .typ-badge.dim-t { background: var(--mbti-t); }
+  .typ-badge.dim-f { background: var(--mbti-f); }
+  .typ-badge.dim-j { background: var(--mbti-j); }
+  .typ-badge.dim-p { background: var(--mbti-p); }
+  .typ-name { font-size: 15px; font-weight: 650; }
+  .typ-cat { color: var(--muted); margin-bottom: 6px; }
+  .typ-dims td.dim-e { color: var(--mbti-e); font-weight: 600; }
+  .typ-dims td.dim-i { color: var(--mbti-i); font-weight: 600; }
+  .typ-dims td.dim-s { color: var(--mbti-s); font-weight: 600; }
+  .typ-dims td.dim-n { color: var(--mbti-n); font-weight: 600; }
+  .typ-dims td.dim-t { color: var(--mbti-t); font-weight: 600; }
+  .typ-dims td.dim-f { color: var(--mbti-f); font-weight: 600; }
+  .typ-dims td.dim-j { color: var(--mbti-j); font-weight: 600; }
+  .typ-dims td.dim-p { color: var(--mbti-p); font-weight: 600; }
+  .bar { display: inline-block; width: 84px; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; vertical-align: middle; }
+  .bar-fill { display: block; height: 100%; }
+  .bar-fill.dim-e { background: var(--mbti-e); }
+  .bar-fill.dim-i { background: var(--mbti-i); }
+  .bar-fill.dim-s { background: var(--mbti-s); }
+  .bar-fill.dim-n { background: var(--mbti-n); }
+  .bar-fill.dim-t { background: var(--mbti-t); }
+  .bar-fill.dim-f { background: var(--mbti-f); }
+  .bar-fill.dim-j { background: var(--mbti-j); }
+  .bar-fill.dim-p { background: var(--mbti-p); }
 </style>
 <!-- 防闪烁：在首屏绘制前定下主题，默认跟随系统偏好 -->
 <script>
