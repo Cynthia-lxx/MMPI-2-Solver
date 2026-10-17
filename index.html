@@ -141,6 +141,10 @@
     summary::after { transition: transform var(--anim-fast) ease; }
     /* 工具栏收起栏箭头旋转 */
     .toolbar-toggle-chevron { transition: transform var(--anim-fast) ease; }
+    /* 工具栏展开 / 收起：高度平滑展开 + 内容淡入 */
+    .toolbar-body { transition: grid-template-rows var(--anim-med) var(--ease-out); }
+    .toolbar-body-inner { transition: opacity var(--anim-fast) ease; }
+    .toolbar.collapsed .toolbar-body-inner { opacity: 0; }
   }
   * { box-sizing: border-box; }
   body {
@@ -174,6 +178,7 @@
   /* 收起栏仅移动端可见；桌面端包裹层透明，保持原有单行布局 */
   .toolbar-toggle { display: none; }
   .toolbar-body { display: contents; }
+  .toolbar-body-inner { display: contents; }
   button {
     font: inherit; padding: 6px 13px; border-radius: 6px; cursor: pointer;
     border: 1px solid var(--line); background: var(--input-bg); color: var(--ink);
@@ -222,10 +227,13 @@
       transform: rotate(45deg);
     }
     .toolbar:not(.collapsed) .toolbar-toggle-chevron { transform: rotate(-135deg); }
-    .toolbar.collapsed .toolbar-body { display: none; }
     .toolbar-body {
+      display: grid; grid-template-rows: 1fr; overflow: hidden;
+    }
+    .toolbar.collapsed .toolbar-body { grid-template-rows: 0fr; }
+    .toolbar-body-inner {
       display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px;
-      padding: 0 14px 12px;
+      padding: 0 14px 12px; min-height: 0; overflow: hidden;
     }
     .toolbar-body label, .toolbar-body .check {
       display: flex; flex-direction: column; align-items: stretch; gap: 4px;
@@ -609,6 +617,7 @@
     <span class="toolbar-toggle-chevron" aria-hidden="true"></span>
   </button>
   <div class="toolbar-body" id="toolbar-body">
+  <div class="toolbar-body-inner">
   <label>量表
     <select id="scale-switch"></select>
   </label>
@@ -645,6 +654,7 @@
       <button id="example" class="mmpi2-only">载入示例</button>
       <button id="clear">清空</button>
     </div>
+  </div>
   </div>
 </div>
 
