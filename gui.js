@@ -62,37 +62,63 @@ let mbtiLoadState = 'idle';
 let mbtiReadyResolve;
 export const mbtiReady = new Promise((r) => { mbtiReadyResolve = r; });
 
-async function loadMbtiIndividual() {
-  const [a, b, c, d, e, f, eng, types] = await Promise.all([
-    import('./mbti_93.data.js'),
-    import('./mbti_16p_quick.data.js'),
-    import('./mbti_16p_standard.data.js'),
-    import('./mbti_16p_full.data.js'),
-    import('./mbti_200md.data.js'),
-    import('./mbti_16p60.data.js'),
-    import('./mbti.js'),
-    import('./mbti_types.js'),
-  ]);
-  return {
-    MBTI93_DATA: a.MBTI93_DATA, MBTI16P_QUICK_DATA: b.MBTI16P_QUICK_DATA,
-    MBTI16P_STANDARD_DATA: c.MBTI16P_STANDARD_DATA, MBTI16P_FULL_DATA: d.MBTI16P_FULL_DATA,
-    MBTI200MD_DATA: e.MBTI200MD_DATA, MBTI16P60_DATA: f.MBTI16P60_DATA,
-    mbtiScore: eng.mbtiScore, mbtiSolve: eng.mbtiSolve, mbtiScoreKnn: eng.mbtiScoreKnn,
-    mbtiParseAnswers: eng.mbtiParseAnswers, mbtiExportCsv: eng.mbtiExportCsv,
-    MBTI_TYPES_16: types.MBTI_TYPES_16,
+/** 通用异步加载进度条：返回 { set(frac, detail), finish() }，供 MBTI 及未来更多异步数据复用。 */
+function showAsyncProgress(label) {
+  const bar = document.getElementById('loadbar');
+  const fill = document.getElementById('loadbar-fill');
+  if (!bar || !fill) return { set() {}, finish() {} };
+  bar.hidden = false;
+  bar.classList.remove('done');
+  fill.style.width = '0%';
+  const set = (frac, detail) => {
+    const pct = Math.max(0, Math.min(1, frac || 0)) * 100;
+    fill.style.width = pct + '%';
+    setNote(detail ? `${label}（${detail}）` : label);
   };
+  const finish = () => {
+    fill.style.width = '100%';
+    bar.classList.add('done');
+    setNote('');
+    setTimeout(() => {
+      bar.hidden = true;
+      bar.classList.remove('done');
+      fill.style.width = '0%';
+    }, 400);
+  };
+  setNote(label);
+  return { set, finish };
+}
+
+async function loadMbtiIndividual(onProgress) {
+  const files = [
+    'mbti_93.data.js', 'mbti_16p_quick.data.js', 'mbti_16p_standard.data.js',
+    'mbti_16p_full.data.js', 'mbti_200md.data.js', 'mbti_16p60.data.js',
+    'mbti.js', 'mbti_types.js',
+  ];
+  const out = {};
+  let done = 0;
+  await Promise.all(files.map(async (f) => {
+    const mod = await import('./' + f);
+    Object.assign(out, mod);
+    done += 1;
+    if (onProgress) onProgress(done / files.length, `已加载 ${done}/${files.length}`);
+  }));
+  return out;
 }
 
 async function ensureMbti() {
   if (mbtiLoadState === 'ready') return;
   if (mbtiLoadState === 'loading') { await mbtiReady; return; }
   mbtiLoadState = 'loading';
+  const progress = showAsyncProgress('正在加载 MBTI 题本数据…');
   let mod;
   try {
-    mod = await import('./mbti.async.js');
-  } catch {
-    mod = await loadMbtiIndividual();
+    mod = await loadMbtiIndividual(progress.set);
+  } catch (e) {
+    try { mod = await import('./mbti.async.js'); } catch { mod = null; }
+    progress.set(1);
   }
+  if (!mod) { progress.finish(); setNote('MBTI 题本加载失败。'); return; }
   MBTI_TYPES_16 = mod.MBTI_TYPES_16 || [];
   mbtiScore = mod.mbtiScore;
   mbtiSolve = mod.mbtiSolve;
@@ -107,6 +133,7 @@ async function ensureMbti() {
   SCALES.mbti16p60.data = mod.MBTI16P60_DATA;
   mbtiLoadState = 'ready';
   mbtiReadyResolve();
+  progress.finish();
 }
 
 /** 量表注册表：加一个新量表 = 在这里加一行 + 一个数据模块 + 下拉里加一个 option。 */

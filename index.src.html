@@ -135,6 +135,8 @@
     .toolbar-body { transition: grid-template-rows var(--anim-med) var(--ease-out); }
     .toolbar-body-inner { transition: opacity var(--anim-fast) ease; }
     .toolbar.collapsed .toolbar-body-inner { opacity: 0; }
+    /* 异步加载进度条填充过渡（减弱动效下不平滑） */
+    .loadbar-fill { transition: width var(--anim-med) var(--ease-out), opacity var(--anim-fast) ease; }
   }
   * { box-sizing: border-box; }
   body {
@@ -169,6 +171,14 @@
   .toolbar-toggle { display: none; }
   .toolbar-body { display: contents; }
   .toolbar-body-inner { display: contents; }
+  /* 异步加载进度条（MBTI 及未来更多异步数据）：固定顶部细条，随加载进度填充 */
+  .loadbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+    height: 3px; background: rgba(120, 140, 170, .2); overflow: hidden;
+  }
+  .loadbar[hidden] { display: none; }
+  .loadbar-fill { height: 100%; width: 0; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .loadbar.done .loadbar-fill { opacity: 0; }
   button {
     font: inherit; padding: 6px 13px; border-radius: 6px; cursor: pointer;
     border: 1px solid var(--line); background: var(--input-bg); color: var(--ink);
@@ -595,6 +605,9 @@
 </script>
 </head>
 <body>
+<div class="loadbar" id="loadbar" hidden role="progressbar" aria-label="加载进度">
+  <div class="loadbar-fill" id="loadbar-fill"></div>
+</div>
 <header>
   <h1>MMPI-2 反算器</h1>
   <p>指定预期 T 分，反求出满足该剖面的 567 题答卷，并标出哪些题目的回答是被锁定的、哪些可以自由组合。</p>
