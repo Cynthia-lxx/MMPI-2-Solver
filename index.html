@@ -42,6 +42,17 @@
     --th-bg: #f6f8fc;
     --q-ink: #3a4456;
     --busy-bg: #e8f0fa;
+    /* 动效令牌：由 ui-tokens.js 的 ANIM 生成，请勿手改 */
+    --anim-scale: 1;
+    --anim-fast: calc(.12s * var(--anim-scale));
+    --anim-xfast: calc(.14s * var(--anim-scale));
+    --anim-hover: calc(.18s * var(--anim-scale));
+    --anim-med: calc(.3s * var(--anim-scale));
+    --anim-pop: calc(.32s * var(--anim-scale));
+    --anim-in: calc(.35s * var(--anim-scale));
+    --anim-slow: calc(.5s * var(--anim-scale));
+    --anim-slower: calc(.55s * var(--anim-scale));
+    --ease-out: cubic-bezier(.2, .7, .3, 1);
   }
   /* 深色模式：由 <html data-theme="dark"> 驱动，首次访问跟随系统偏好 */
   :root[data-theme="dark"] {
@@ -89,25 +100,25 @@
     @keyframes notePulse { 0% { box-shadow: 0 0 0 0 var(--accent-soft); } 60% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 
     /* 首屏入场：页头 → 工具栏 → 面板，轻微错峰上浮 */
-    header { animation: appIn .5s cubic-bezier(.2, .7, .3, 1) both; }
-    .toolbar { animation: appIn .5s cubic-bezier(.2, .7, .3, 1) .08s both; }
-    .panel { animation: appIn .55s cubic-bezier(.2, .7, .3, 1) .14s both; }
+    header { animation: appIn var(--anim-slow) var(--ease-out) both; }
+    .toolbar { animation: appIn var(--anim-slow) var(--ease-out) .08s both; }
+    .panel { animation: appIn var(--anim-slower) var(--ease-out) .14s both; }
 
     /* 按钮：悬停描边过渡 + 按下微缩 */
-    button { transition: transform .12s ease, border-color .15s ease, color .15s ease, background-color .15s ease, box-shadow .15s ease; }
+    button { transition: transform var(--anim-fast) ease, border-color var(--anim-xfast) ease, color var(--anim-xfast) ease, background-color var(--anim-xfast) ease, box-shadow var(--anim-xfast) ease; }
     button:active:not(:disabled) { transform: scale(.96); }
     button.primary:active:not(:disabled) { transform: scale(.97); }
 
     /* 答案格：悬停轻抬；A/B 翻转有弹跳 */
-    .cell { transition: transform .14s ease, background-color .18s ease, box-shadow .18s ease; }
+    .cell { transition: transform var(--anim-xfast) ease, background-color var(--anim-hover) ease, box-shadow var(--anim-hover) ease; }
     .cell:hover { transform: translateY(-1px); }
     .cell.typ:hover { transform: translateY(-1px) scale(1.02); }
-    .cell-in { animation: cellIn .3s ease both; }
-    .cell-pop { animation: cellPop .32s ease; }
+    .cell-in { animation: cellIn var(--anim-med) ease both; }
+    .cell-pop { animation: cellPop var(--anim-pop) ease; }
 
     /* 区块切换时的轻微滑入；状态达成时的脉冲提示 */
-    .content-in { animation: contentIn .35s cubic-bezier(.2, .7, .3, 1) both; }
-    .status.ok { animation: notePulse .5s ease both; }
+    .content-in { animation: contentIn var(--anim-in) var(--ease-out) both; }
+    .status.ok { animation: notePulse var(--anim-slow) ease both; }
   }
   * { box-sizing: border-box; }
   body {
@@ -374,7 +385,7 @@
   .bank-wrap td.ans.is-lvl { color: var(--accent); font-weight: 600; }
   #profile table, #target-table table { width: 100%; border-collapse: collapse; font-size: 13px; }
   #profile th, #profile td, #target-table th, #target-table td {
-    padding: 4px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top;
+    padding: 4px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top;
   }
   #profile td.hot, #target-table td.hot { color: var(--bad); font-weight: 600; }
   .cell.multi .lvl { min-width: 26px; }
@@ -483,8 +494,7 @@
     <div id="scale-list"></div>
     <p class="hint mmpi2-only" id="mode-hint">精确值：Hs 必须正好等于该 T 分。区间 / 不低于 / 不高于 会把目标放宽成一个取值范围，
       求解器在区间内自行取值，满足条件的答卷因此更多。</p>
-    <p class="hint likert-only" id="scl90-hint">滑轨按选项分块，白框标出该题在当前目标下的可行区间；
-      拖动会在同因子内自动调平，使目标均分保持不变。也可以点「生成答卷」精确求解。</p>
+    <p class="hint likert-only" id="scl90-hint">滑轨按选项分块，白框标出该题在当前目标下的可行区间；拖动会在同因子内自动调平，使目标均分保持不变。也可以点「生成答卷」精确求解。</p>
     <details class="bulk mmpi2-only">
       <summary>批量输入</summary>
       <textarea id="bulk" rows="5" placeholder="每行一个：Hs=70、Sc 81、Pt:74、Hs=65-75、Sc>=80、Pt<=60"></textarea>
@@ -542,11 +552,8 @@
       </details>
 
       <h3 id="h-answers"><span id="h-answers-label">567 题回答</span><span id="free-count" class="chip"></span></h3>
-      <p class="hint mmpi2-only">紫色虚线框为「自由题」：翻转它不会改变任何目标量表的分数，点击即可切换；
-        蓝色虚线框为「区间内可翻转」——它会改动目标量表，但翻过去后目标仍落在区间内，只能一道一道改；
-        实线框为锁定题，翻转会破坏目标（悬停可看它影响哪些量表）。</p>
-      <p class="hint likert-only">滑轨按选项分块；白框是该题在当前目标下的可行区间（框越窄越受限，只剩一格即锁定）。
-        拖动会在同因子内自动调平，目标均分保持不变；也可点选滑轨或用方向键微调。</p>
+      <p class="hint mmpi2-only">粉色虚线框为「自由题」：翻转它不会改变任何目标量表的分数，点击即可切换；蓝色虚线框为「区间内可翻转」——它会改动目标量表，但翻过去后目标仍落在区间内，只能一道一道改；实线框为锁定题，翻转会破坏目标（悬停可看它影响哪些量表）。</p>
+      <p class="hint likert-only">滑轨按选项分块；白框是该题在当前目标下的可行区间（框越窄越受限，只剩一格即锁定）。拖动会在同因子内自动调平，目标均分保持不变；也可点选滑轨或用方向键微调。</p>
       <div id="answers" class="grid"></div>
     </div>
   </section>
@@ -3800,6 +3807,73 @@ function fillUnknown(answers, options = {}) {
   return out;
 }
 
+/* ===== ui-tokens.js ===== */
+/**
+ * 与视觉设计强耦合的 UX 文案与动效参数，集中在此「宏常量」里。
+ *
+ * 目的：换配色 / 调字号 / 改动效速度时只改这一处，界面文案与实际样式不再失配
+ * （例如自由题框换成另一种颜色后，提示文案里的颜色词会自动跟着变）。
+ *
+ * 生效方式：
+ *  - 构建时 build-site.mjs 会读取本文件，把 index.src.html 里的双花括号占位符
+ *    替换成这里 UI_TEXT / THEME 的值；
+ *  - 同时把 ANIM 生成为 :root 下的 CSS 自定义属性（--anim-* / --ease-out），
+ *    CSS 动画全部走 var(--anim-*) 引用，调 --anim-scale 即可整体加减速；
+ *  - gui.js 也直接引用 UI_TEXT，保证运行时写入的文案与静态 HTML 同源。
+ */
+
+const THEME = {
+  /** 自由题虚线框：对应 --free（当前为玫瑰粉 #c98aa6） */
+  freeColorName: '粉色',
+  /** 区间内可翻转虚线框：对应 --accent（当前为品牌蓝 #2f6fb3） */
+  slackColorName: '蓝色',
+  /** 滑轨上的可行区间框：对应 .slide-mark 的白色描边 */
+  slideFrameName: '白框',
+  /** 剖面阈值色：对应 --warn / --bad */
+  warnColorName: '橙色',
+  badColorName: '红色',
+};
+
+const UI_TEXT = {
+  /** MMPI（二值作答）答案区图例 */
+  mmpiAnswerHint:
+    `${THEME.freeColorName}虚线框为「自由题」：翻转它不会改变任何目标量表的分数，点击即可切换；` +
+    `${THEME.slackColorName}虚线框为「区间内可翻转」——它会改动目标量表，但翻过去后目标仍落在区间内，只能一道一道改；` +
+    '实线框为锁定题，翻转会破坏目标（悬停可看它影响哪些量表）。',
+
+  /** SCL-90 滑轨提示（左栏区间求解面板） */
+  scl90Hint:
+    `滑轨按选项分块，${THEME.slideFrameName}标出该题在当前目标下的可行区间；` +
+    '拖动会在同因子内自动调平，使目标均分保持不变。也可以点「生成答卷」精确求解。',
+
+  /** 多级作答（Likert / Choice）答案区图例 */
+  likertAnswerHint:
+    `滑轨按选项分块；${THEME.slideFrameName}是该题在当前目标下的可行区间（框越窄越受限，只剩一格即锁定）。` +
+    '拖动会在同因子内自动调平，目标均分保持不变；也可点选滑轨或用方向键微调。',
+
+  /** MMPI 剖面折叠标题（阈值配色） */
+  profileSummaryMmpi:
+    `完整剖面（87 个量表，${THEME.warnColorName} ≥ 65、${THEME.badColorName} ≥ 80）`,
+};
+
+const ANIM = {
+  /** 全局动效速度因子：1=基准，>1 整体更慢，<1 整体更快（会生成 --anim-scale） */
+  scale: 1,
+  /** 各档时长，构建时生成 calc(<时长> * var(--anim-scale)) */
+  durations: {
+    fast: '.12s',
+    xfast: '.14s',
+    hover: '.18s',
+    med: '.3s',
+    pop: '.32s',
+    in: '.35s',
+    slow: '.5s',
+    slower: '.55s',
+  },
+  /** 统一缓动曲线 */
+  easeOut: 'cubic-bezier(.2, .7, .3, 1)',
+};
+
 /* ===== gui.js ===== */
 /**
  * MMPI-2 inverse-solver GUI.
@@ -6197,7 +6271,7 @@ async function switchScale(value) {
     if (hTarget) hTarget.textContent = '目标达成';
     if (hAnswersLabel) hAnswersLabel.textContent = '567 题回答';
     if (hBank) hBank.textContent = '题库（567 题原文）';
-    if (summaryProfile) summaryProfile.textContent = '完整剖面（87 个量表，橙色 ≥ 65、红色 ≥ 80）';
+    if (summaryProfile) summaryProfile.textContent = UI_TEXT.profileSummaryMmpi;
     if (dom.copy) dom.copy.textContent = '复制 T/F';
   } else if (isTypology()) {
     const meta = scaleMeta();

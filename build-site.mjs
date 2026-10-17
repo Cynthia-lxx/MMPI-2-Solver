@@ -14,6 +14,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
+import { THEME, UI_TEXT, ANIM } from './ui-tokens.js';
+
 const root = dirname(fileURLToPath(import.meta.url));
 const SOURCES = [
   'data.js', 'formats.js',
@@ -23,7 +25,7 @@ const SOURCES = [
   'mbti_93.data.js', 'mbti_16p_quick.data.js', 'mbti_16p_standard.data.js',
   'mbti_16p_full.data.js', 'mbti_200md.data.js', 'mbti_16p60.data.js',
   'mbti.js', 'mbti_types.js',
-  'inverse.js', 'xlsx.js', 'sheet.js', 'gui.js',
+  'inverse.js', 'xlsx.js', 'sheet.js', 'ui-tokens.js', 'gui.js',
 ];
 const SRC = 'index.src.html';
 
@@ -55,7 +57,23 @@ const template = readFileSync(join(root, SRC), 'utf8');
 if (!template.includes(marker)) {
   throw new Error(`${SRC}: module script tag not found -- update build-site.mjs`);
 }
-const html = template.replace(marker, `<script>\n${bundle}\n</script>`);
+
+// ---- 宏常量替换：UX 文案走 {{占位符}}，动效令牌生成 :root 下的 CSS 变量 ----
+const macros = { ...THEME, ...UI_TEXT };
+const animTokens = [
+  '/* 动效令牌：由 ui-tokens.js 的 ANIM 生成，请勿手改 */',
+  `    --anim-scale: ${ANIM.scale};`,
+  ...Object.entries(ANIM.durations).map(
+    ([name, dur]) => `    --anim-${name}: calc(${dur} * var(--anim-scale));`,
+  ),
+  `    --ease-out: ${ANIM.easeOut};`,
+].join('\n');
+const expandMacros = (src) => src
+  .replace(/\/\*\s*@ANIM_TOKENS@\s*\*\//g, animTokens)
+  .replace(/\{\{\s*(\w+)\s*\}\}/g, (m, key) => (key in macros ? macros[key] : m));
+
+const expanded = expandMacros(template);
+const html = expanded.replace(marker, `<script>\n${bundle}\n</script>`);
 
 writeFileSync(join(root, 'index.html'), html);
 

@@ -12,6 +12,7 @@
  */
 
 import { MMPI2_DATA } from './data.js';
+import { UI_TEXT } from './ui-tokens.js';
 import {
   InverseModel,
   solve,
@@ -2442,7 +2443,7 @@ async function switchScale(value) {
     if (hTarget) hTarget.textContent = '目标达成';
     if (hAnswersLabel) hAnswersLabel.textContent = '567 题回答';
     if (hBank) hBank.textContent = '题库（567 题原文）';
-    if (summaryProfile) summaryProfile.textContent = '完整剖面（87 个量表，橙色 ≥ 65、红色 ≥ 80）';
+    if (summaryProfile) summaryProfile.textContent = UI_TEXT.profileSummaryMmpi;
     if (dom.copy) dom.copy.textContent = '复制 T/F';
   } else if (isTypology()) {
     const meta = scaleMeta();
