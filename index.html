@@ -147,6 +147,7 @@
     .toolbar.collapsed .toolbar-body-inner { opacity: 0; }
     /* 异步加载进度条填充过渡（减弱动效下不平滑） */
     .loadbar-fill { transition: width var(--anim-med) var(--ease-out), opacity var(--anim-fast) ease; }
+    .lp-fill { transition: width var(--anim-med) var(--ease-out); }
   }
   * { box-sizing: border-box; }
   body {
@@ -196,6 +197,27 @@
     background: var(--bg); box-shadow: 0 1px 4px rgba(0, 0, 0, .18);
   }
   .loadbar-pct[hidden] { display: none; }
+  /* 异步加载进度界面：PC 让某版块变成进度条版块；手机 dim 原页面并叠加可取消/关闭的遮罩 */
+  .work-panel { position: relative; }
+  .load-panel { display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .load-panel[hidden] { display: none; }
+  .load-panel.inline { position: absolute; inset: 0; z-index: 50; background: var(--panel); }
+  .load-panel.overlay {
+    position: fixed; inset: 0; z-index: 1002;
+    background: rgba(15, 18, 24, .55); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px);
+  }
+  .lp-card {
+    width: 100%; max-width: 440px; background: var(--bg);
+    border: 1px solid var(--line); border-radius: 14px; padding: 22px 22px 18px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, .28); display: flex; flex-direction: column; gap: 12px;
+  }
+  .lp-label { font-size: 14px; color: var(--muted); }
+  .lp-bar { height: 14px; border-radius: 7px; background: rgba(120, 140, 170, .2); overflow: hidden; }
+  .lp-fill { height: 100%; width: 0; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+  .lp-stats { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .lp-pct { font-size: 30px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; color: var(--accent); }
+  .lp-traffic { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .lp-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; }
   button {
     font: inherit; padding: 6px 13px; border-radius: 6px; cursor: pointer;
     border: 1px solid var(--line); background: var(--input-bg); color: var(--ink);
@@ -722,7 +744,7 @@
     </details>
   </section>
 
-  <section class="panel">
+  <section class="panel" id="work-panel">
     <h2>答卷</h2>
     <div class="actions">
       <button id="solve" class="primary" disabled>生成答卷</button>
@@ -747,6 +769,20 @@
       <p class="hint mmpi2-only">粉色虚线框为「自由题」：翻转它不会改变任何目标量表的分数，点击即可切换；蓝色虚线框为「区间内可翻转」——它会改动目标量表，但翻过去后目标仍落在区间内，只能一道一道改；实线框为锁定题，翻转会破坏目标（悬停可看它影响哪些量表）。</p>
       <p class="hint likert-only">滑轨按选项分块；白框是该题在当前目标下的可行区间（框越窄越受限，只剩一格即锁定）。拖动会在同因子内自动调平，目标均分保持不变；也可点选滑轨或用方向键微调。</p>
       <div id="answers" class="grid"></div>
+    </div>
+    <div class="load-panel" id="load-panel" hidden role="dialog" aria-label="加载进度">
+      <div class="lp-card">
+        <div class="lp-label" id="lp-label">正在加载…</div>
+        <div class="lp-bar"><div class="lp-fill" id="lp-fill"></div></div>
+        <div class="lp-stats">
+          <span class="lp-pct" id="lp-pct">0.000%</span>
+          <span class="lp-traffic" id="lp-traffic"></span>
+        </div>
+        <div class="lp-actions">
+          <button type="button" id="lp-cancel" class="ghost">取消加载</button>
+          <button type="button" id="lp-close" class="ghost">关闭</button>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -4086,40 +4122,71 @@ let mbtiLoadState = 'idle';
 let mbtiReadyResolve;
 const mbtiReady = new Promise((r) => { mbtiReadyResolve = r; });
 
-/** 通用异步加载进度条：返回 { set(frac, detail), finish() }，供 MBTI 及未来更多异步数据复用。 */
-function showAsyncProgress(label) {
+/** 通用异步加载进度界面：PC 把某版块变成进度条版块，手机叠加可取消/关闭的遮罩。
+ *  返回 { set(frac, info), finish(), cancel() }，info = { pct, traffic }。 */
+function showAsyncProgress(label, opts) {
+  opts = opts || {};
   const bar = document.getElementById('loadbar');
   const fill = document.getElementById('loadbar-fill');
   const pctEl = document.getElementById('loadbar-pct');
-  if (!bar || !fill) return { set() {}, finish() {} };
-  bar.hidden = false;
-  if (pctEl) pctEl.hidden = false;
-  bar.classList.remove('done');
-  fill.style.width = '0%';
-  if (pctEl) pctEl.textContent = '0.000%';
-  const set = (frac, detail) => {
+  const panel = document.getElementById('load-panel');
+  const pFill = document.getElementById('lp-fill');
+  const pPct = document.getElementById('lp-pct');
+  const pTraffic = document.getElementById('lp-traffic');
+  const pLabel = document.getElementById('lp-label');
+  const cancelBtn = document.getElementById('lp-cancel');
+  const closeBtn = document.getElementById('lp-close');
+  if (!panel || !pFill) return { set() {}, finish() {}, cancel() {} };
+  const isMobile = typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 640px)').matches;
+  panel.classList.toggle('overlay', isMobile);
+  panel.classList.toggle('inline', !isMobile);
+  panel.hidden = false;
+  if (pLabel) pLabel.textContent = label;
+  pFill.style.width = '0%';
+  if (pPct) pPct.textContent = '0.000%';
+  if (pTraffic) pTraffic.textContent = '';
+  if (bar) { bar.hidden = false; bar.classList.remove('done'); if (fill) fill.style.width = '0%'; }
+  if (pctEl) { pctEl.hidden = false; pctEl.textContent = '0.000%'; }
+  setNote(label);
+
+  let userClosed = false;
+  if (cancelBtn) cancelBtn.onclick = () => { if (opts.onCancel) opts.onCancel(); finish(); };
+  if (closeBtn) closeBtn.onclick = () => { userClosed = true; panel.hidden = true; };
+
+  const set = (frac, info) => {
     const p = Math.max(0, Math.min(1, frac || 0));
-    fill.style.width = (p * 100) + '%';
-    if (pctEl) pctEl.textContent = (p * 100).toFixed(3) + '%';
-    setNote(detail ? `${label}　${detail}` : label);
+    const pct = p * 100;
+    if (bar && fill) fill.style.width = pct + '%';
+    if (pctEl) pctEl.textContent = pct.toFixed(3) + '%';
+    if (!userClosed) {
+      if (pFill) pFill.style.width = pct + '%';
+      if (pPct) pPct.textContent = pct.toFixed(3) + '%';
+      if (pTraffic && info && info.traffic) pTraffic.textContent = info.traffic;
+    }
   };
   const finish = () => {
-    fill.style.width = '100%';
+    if (bar && fill) fill.style.width = '100%';
     if (pctEl) pctEl.textContent = '100.000%';
-    bar.classList.add('done');
+    if (!userClosed) {
+      if (pFill) pFill.style.width = '100%';
+      if (pPct) pPct.textContent = '100.000%';
+    }
+    panel.classList.add('done');
+    if (bar) bar.classList.add('done');
     setNote('');
     setTimeout(() => {
-      bar.hidden = true;
+      panel.hidden = true;
+      panel.classList.remove('overlay', 'inline', 'done');
+      if (pFill) pFill.style.width = '0%';
+      if (bar) { bar.hidden = true; bar.classList.remove('done'); if (fill) fill.style.width = '0%'; }
       if (pctEl) pctEl.hidden = true;
-      bar.classList.remove('done');
-      fill.style.width = '0%';
     }, 400);
   };
-  setNote(label);
-  return { set, finish };
+  const cancel = () => { if (opts.onCancel) opts.onCancel(); finish(); };
+  return { set, finish, cancel };
 }
 
-async function loadMbtiTraffic(onProgress) {
+async function loadMbtiTraffic(onProgress, signal) {
   const files = [
     'mbti_93.data.js', 'mbti_16p_quick.data.js', 'mbti_16p_standard.data.js',
     'mbti_16p_full.data.js', 'mbti_200md.data.js', 'mbti_16p60.data.js',
@@ -4140,14 +4207,14 @@ async function loadMbtiTraffic(onProgress) {
   const report = () => {
     const cur = files.reduce((s, f) => s + loaded[f], 0);
     const frac = total ? cur / total : 0;
-    onProgress(frac, `${(frac * 100).toFixed(3)}% · ${fmt(cur)} / ${fmt(total)}`);
+    onProgress(frac, { pct: (frac * 100).toFixed(3) + '%', traffic: `${fmt(cur)} / ${fmt(total)}` });
   };
   const out = {};
   await Promise.all(files.map(async (f) => {
     let mod;
     try {
       if (typeof fetch !== 'function') throw new Error('no fetch');
-      const resp = await fetch('./' + f);
+      const resp = await fetch('./' + f, signal ? { signal } : undefined);
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const len = Number(resp.headers.get('content-length')) || sizes[f] || 0;
       const reader = resp.body && resp.body.getReader ? resp.body.getReader() : null;
@@ -4167,6 +4234,7 @@ async function loadMbtiTraffic(onProgress) {
       try { mod = await import(url); } finally { URL.revokeObjectURL(url); }
       loaded[f] = len || got;
     } catch (e) {
+      if (e && e.name === 'AbortError') throw e;
       // 回退：直接动态 import（file:// 或 fetch 不可用场景），按字节数加权计数。
       mod = await import('./' + f);
       loaded[f] = sizes[f] || 1;
@@ -4181,15 +4249,35 @@ async function ensureMbti() {
   if (mbtiLoadState === 'ready') return;
   if (mbtiLoadState === 'loading') { await mbtiReady; return; }
   mbtiLoadState = 'loading';
-  const progress = showAsyncProgress('正在加载 MBTI 题本数据…');
+  const controller = (typeof AbortController === 'function') ? new AbortController() : null;
+  const progress = showAsyncProgress('正在加载 MBTI 题本数据…', {
+    onCancel: controller ? () => controller.abort() : null,
+  });
   let mod;
+  let aborted = false;
   try {
-    mod = await loadMbtiTraffic(progress.set);
+    mod = await loadMbtiTraffic(progress.set, controller ? controller.signal : null);
   } catch (e) {
-    try { mod = await import('./mbti.async.js'); } catch { mod = null; }
-    progress.set(1);
+    if (e && e.name === 'AbortError') aborted = true;
+    else {
+      try { mod = await import('./mbti.async.js'); } catch { mod = null; }
+      progress.set(1);
+    }
   }
-  if (!mod) { progress.finish(); setNote('MBTI 题本加载失败。'); return; }
+  if (aborted) {
+    mbtiLoadState = 'idle';
+    mbtiReadyResolve();
+    progress.finish();
+    setNote('已取消 MBTI 题本加载。');
+    return;
+  }
+  if (!mod) {
+    mbtiLoadState = 'idle';
+    mbtiReadyResolve();
+    progress.finish();
+    setNote('MBTI 题本加载失败。');
+    return;
+  }
   MBTI_TYPES_16 = mod.MBTI_TYPES_16 || [];
   mbtiScore = mod.mbtiScore;
   mbtiSolve = mod.mbtiSolve;

@@ -62,40 +62,71 @@ let mbtiLoadState = 'idle';
 let mbtiReadyResolve;
 export const mbtiReady = new Promise((r) => { mbtiReadyResolve = r; });
 
-/** 通用异步加载进度条：返回 { set(frac, detail), finish() }，供 MBTI 及未来更多异步数据复用。 */
-function showAsyncProgress(label) {
+/** 通用异步加载进度界面：PC 把某版块变成进度条版块，手机叠加可取消/关闭的遮罩。
+ *  返回 { set(frac, info), finish(), cancel() }，info = { pct, traffic }。 */
+function showAsyncProgress(label, opts) {
+  opts = opts || {};
   const bar = document.getElementById('loadbar');
   const fill = document.getElementById('loadbar-fill');
   const pctEl = document.getElementById('loadbar-pct');
-  if (!bar || !fill) return { set() {}, finish() {} };
-  bar.hidden = false;
-  if (pctEl) pctEl.hidden = false;
-  bar.classList.remove('done');
-  fill.style.width = '0%';
-  if (pctEl) pctEl.textContent = '0.000%';
-  const set = (frac, detail) => {
+  const panel = document.getElementById('load-panel');
+  const pFill = document.getElementById('lp-fill');
+  const pPct = document.getElementById('lp-pct');
+  const pTraffic = document.getElementById('lp-traffic');
+  const pLabel = document.getElementById('lp-label');
+  const cancelBtn = document.getElementById('lp-cancel');
+  const closeBtn = document.getElementById('lp-close');
+  if (!panel || !pFill) return { set() {}, finish() {}, cancel() {} };
+  const isMobile = typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 640px)').matches;
+  panel.classList.toggle('overlay', isMobile);
+  panel.classList.toggle('inline', !isMobile);
+  panel.hidden = false;
+  if (pLabel) pLabel.textContent = label;
+  pFill.style.width = '0%';
+  if (pPct) pPct.textContent = '0.000%';
+  if (pTraffic) pTraffic.textContent = '';
+  if (bar) { bar.hidden = false; bar.classList.remove('done'); if (fill) fill.style.width = '0%'; }
+  if (pctEl) { pctEl.hidden = false; pctEl.textContent = '0.000%'; }
+  setNote(label);
+
+  let userClosed = false;
+  if (cancelBtn) cancelBtn.onclick = () => { if (opts.onCancel) opts.onCancel(); finish(); };
+  if (closeBtn) closeBtn.onclick = () => { userClosed = true; panel.hidden = true; };
+
+  const set = (frac, info) => {
     const p = Math.max(0, Math.min(1, frac || 0));
-    fill.style.width = (p * 100) + '%';
-    if (pctEl) pctEl.textContent = (p * 100).toFixed(3) + '%';
-    setNote(detail ? `${label}　${detail}` : label);
+    const pct = p * 100;
+    if (bar && fill) fill.style.width = pct + '%';
+    if (pctEl) pctEl.textContent = pct.toFixed(3) + '%';
+    if (!userClosed) {
+      if (pFill) pFill.style.width = pct + '%';
+      if (pPct) pPct.textContent = pct.toFixed(3) + '%';
+      if (pTraffic && info && info.traffic) pTraffic.textContent = info.traffic;
+    }
   };
   const finish = () => {
-    fill.style.width = '100%';
+    if (bar && fill) fill.style.width = '100%';
     if (pctEl) pctEl.textContent = '100.000%';
-    bar.classList.add('done');
+    if (!userClosed) {
+      if (pFill) pFill.style.width = '100%';
+      if (pPct) pPct.textContent = '100.000%';
+    }
+    panel.classList.add('done');
+    if (bar) bar.classList.add('done');
     setNote('');
     setTimeout(() => {
-      bar.hidden = true;
+      panel.hidden = true;
+      panel.classList.remove('overlay', 'inline', 'done');
+      if (pFill) pFill.style.width = '0%';
+      if (bar) { bar.hidden = true; bar.classList.remove('done'); if (fill) fill.style.width = '0%'; }
       if (pctEl) pctEl.hidden = true;
-      bar.classList.remove('done');
-      fill.style.width = '0%';
     }, 400);
   };
-  setNote(label);
-  return { set, finish };
+  const cancel = () => { if (opts.onCancel) opts.onCancel(); finish(); };
+  return { set, finish, cancel };
 }
 
-async function loadMbtiTraffic(onProgress) {
+async function loadMbtiTraffic(onProgress, signal) {
   const files = [
     'mbti_93.data.js', 'mbti_16p_quick.data.js', 'mbti_16p_standard.data.js',
     'mbti_16p_full.data.js', 'mbti_200md.data.js', 'mbti_16p60.data.js',
@@ -116,14 +147,14 @@ async function loadMbtiTraffic(onProgress) {
   const report = () => {
     const cur = files.reduce((s, f) => s + loaded[f], 0);
     const frac = total ? cur / total : 0;
-    onProgress(frac, `${(frac * 100).toFixed(3)}% · ${fmt(cur)} / ${fmt(total)}`);
+    onProgress(frac, { pct: (frac * 100).toFixed(3) + '%', traffic: `${fmt(cur)} / ${fmt(total)}` });
   };
   const out = {};
   await Promise.all(files.map(async (f) => {
     let mod;
     try {
       if (typeof fetch !== 'function') throw new Error('no fetch');
-      const resp = await fetch('./' + f);
+      const resp = await fetch('./' + f, signal ? { signal } : undefined);
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const len = Number(resp.headers.get('content-length')) || sizes[f] || 0;
       const reader = resp.body && resp.body.getReader ? resp.body.getReader() : null;
@@ -143,6 +174,7 @@ async function loadMbtiTraffic(onProgress) {
       try { mod = await import(url); } finally { URL.revokeObjectURL(url); }
       loaded[f] = len || got;
     } catch (e) {
+      if (e && e.name === 'AbortError') throw e;
       // 回退：直接动态 import（file:// 或 fetch 不可用场景），按字节数加权计数。
       mod = await import('./' + f);
       loaded[f] = sizes[f] || 1;
@@ -157,15 +189,35 @@ async function ensureMbti() {
   if (mbtiLoadState === 'ready') return;
   if (mbtiLoadState === 'loading') { await mbtiReady; return; }
   mbtiLoadState = 'loading';
-  const progress = showAsyncProgress('正在加载 MBTI 题本数据…');
+  const controller = (typeof AbortController === 'function') ? new AbortController() : null;
+  const progress = showAsyncProgress('正在加载 MBTI 题本数据…', {
+    onCancel: controller ? () => controller.abort() : null,
+  });
   let mod;
+  let aborted = false;
   try {
-    mod = await loadMbtiTraffic(progress.set);
+    mod = await loadMbtiTraffic(progress.set, controller ? controller.signal : null);
   } catch (e) {
-    try { mod = await import('./mbti.async.js'); } catch { mod = null; }
-    progress.set(1);
+    if (e && e.name === 'AbortError') aborted = true;
+    else {
+      try { mod = await import('./mbti.async.js'); } catch { mod = null; }
+      progress.set(1);
+    }
   }
-  if (!mod) { progress.finish(); setNote('MBTI 题本加载失败。'); return; }
+  if (aborted) {
+    mbtiLoadState = 'idle';
+    mbtiReadyResolve();
+    progress.finish();
+    setNote('已取消 MBTI 题本加载。');
+    return;
+  }
+  if (!mod) {
+    mbtiLoadState = 'idle';
+    mbtiReadyResolve();
+    progress.finish();
+    setNote('MBTI 题本加载失败。');
+    return;
+  }
   MBTI_TYPES_16 = mod.MBTI_TYPES_16 || [];
   mbtiScore = mod.mbtiScore;
   mbtiSolve = mod.mbtiSolve;

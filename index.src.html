@@ -137,6 +137,7 @@
     .toolbar.collapsed .toolbar-body-inner { opacity: 0; }
     /* 异步加载进度条填充过渡（减弱动效下不平滑） */
     .loadbar-fill { transition: width var(--anim-med) var(--ease-out), opacity var(--anim-fast) ease; }
+    .lp-fill { transition: width var(--anim-med) var(--ease-out); }
   }
   * { box-sizing: border-box; }
   body {
@@ -186,6 +187,27 @@
     background: var(--bg); box-shadow: 0 1px 4px rgba(0, 0, 0, .18);
   }
   .loadbar-pct[hidden] { display: none; }
+  /* 异步加载进度界面：PC 让某版块变成进度条版块；手机 dim 原页面并叠加可取消/关闭的遮罩 */
+  .work-panel { position: relative; }
+  .load-panel { display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .load-panel[hidden] { display: none; }
+  .load-panel.inline { position: absolute; inset: 0; z-index: 50; background: var(--panel); }
+  .load-panel.overlay {
+    position: fixed; inset: 0; z-index: 1002;
+    background: rgba(15, 18, 24, .55); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px);
+  }
+  .lp-card {
+    width: 100%; max-width: 440px; background: var(--bg);
+    border: 1px solid var(--line); border-radius: 14px; padding: 22px 22px 18px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, .28); display: flex; flex-direction: column; gap: 12px;
+  }
+  .lp-label { font-size: 14px; color: var(--muted); }
+  .lp-bar { height: 14px; border-radius: 7px; background: rgba(120, 140, 170, .2); overflow: hidden; }
+  .lp-fill { height: 100%; width: 0; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+  .lp-stats { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .lp-pct { font-size: 30px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; color: var(--accent); }
+  .lp-traffic { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .lp-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; }
   button {
     font: inherit; padding: 6px 13px; border-radius: 6px; cursor: pointer;
     border: 1px solid var(--line); background: var(--input-bg); color: var(--ink);
@@ -712,7 +734,7 @@
     </details>
   </section>
 
-  <section class="panel">
+  <section class="panel" id="work-panel">
     <h2>答卷</h2>
     <div class="actions">
       <button id="solve" class="primary" disabled>生成答卷</button>
@@ -737,6 +759,20 @@
       <p class="hint mmpi2-only">{{mmpiAnswerHint}}</p>
       <p class="hint likert-only">{{likertAnswerHint}}</p>
       <div id="answers" class="grid"></div>
+    </div>
+    <div class="load-panel" id="load-panel" hidden role="dialog" aria-label="加载进度">
+      <div class="lp-card">
+        <div class="lp-label" id="lp-label">正在加载…</div>
+        <div class="lp-bar"><div class="lp-fill" id="lp-fill"></div></div>
+        <div class="lp-stats">
+          <span class="lp-pct" id="lp-pct">0.000%</span>
+          <span class="lp-traffic" id="lp-traffic"></span>
+        </div>
+        <div class="lp-actions">
+          <button type="button" id="lp-cancel" class="ghost">取消加载</button>
+          <button type="button" id="lp-close" class="ghost">关闭</button>
+        </div>
+      </div>
     </div>
   </section>
 
