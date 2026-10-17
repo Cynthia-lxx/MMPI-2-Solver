@@ -58,11 +58,14 @@ check(!$('results').hidden, '结果区展开');
 check($('status').className.includes('ok'), '状态为命中', JSON.stringify($('status').textContent));
 check($('answers').querySelectorAll('.cell').length === 90, '渲染 90 道 SCL-90 题', `${$('answers').querySelectorAll('.cell').length}`);
 
-/* 每道题是多级（Likert）按钮，而非 T/F ---------------------------------- */
+/* 每道题是多级滑杆，而非 T/F 或按钮 ---------------------------------- */
 const firstCell = $('answers').querySelector('.cell');
-check(firstCell.classList.contains('multi'), '答题单元为多级（Likert）', firstCell.className);
-const lvlBtns = firstCell.querySelectorAll('button[data-level]');
-check(lvlBtns.length === 5, '每题 5 个程度按钮', `${lvlBtns.length}`);
+check(firstCell.classList.contains('slide'), '答题单元为滑杆', firstCell.className);
+const firstTrack = firstCell.querySelector('.slide-track');
+check(!!firstTrack, '存在滑轨');
+check(firstTrack.dataset.n === '5', '滑轨按 5 个选项分块', firstTrack.dataset.n);
+check(!!firstCell.querySelector('.slide-mark'), '滑轨标出可行区间');
+check(/linear-gradient/.test(firstTrack.getAttribute('style') || ''), '滑轨背景为分块渐变');
 
 /* 目标达成表含抑郁且达成均分≈4.2 -------------------------------------- */
 const tRows = $('target-table').querySelectorAll('tbody tr');
@@ -75,16 +78,28 @@ check(Math.abs(depMean - 4.2) <= 0.08, '抑郁达成均分 ≈ 4.2', `${depMean}
 const pRows = $('profile').querySelectorAll('tbody tr');
 check(pRows.length === 12, '完整剖面 12 个维度', `${pRows.length}`);
 
-/* 点击级别按钮改答案，剖面随之更新 ------------------------------------ */
+/* 键盘调整滑杆，同因子重分配后目标均值保持不变 ------------------------ */
 const depCell = $('answers').querySelector('.cell[data-item="14"]'); // 第 14 题属抑郁
-const wasOn = depCell.querySelector('button[data-level="3"]').classList.contains('on');
-depCell.querySelector('button[data-level="3"]').dispatchEvent(new window.Event('click', { bubbles: true }));
+const depTrack = depCell.querySelector('.slide-track');
+const before = Number(depTrack.getAttribute('aria-valuenow'));
+depTrack.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
 await wait(30);
-// 点击会重建网格，需重新查询
+// 提交会重建网格，需重新查询
 const depCell2 = $('answers').querySelector('.cell[data-item="14"]');
-check(depCell2.querySelector('button[data-level="3"]').classList.contains('on') !== wasOn, '点击程度按钮切换选中');
+const after = Number(depCell2.querySelector('.slide-track').getAttribute('aria-valuenow'));
+check(after !== before, '键盘调整滑杆改变答案', `${before} -> ${after}`);
 const depRowAfter = [...$('target-table').querySelectorAll('tbody tr')].find((r) => r.textContent.includes('抑郁'));
 check(!!depRowAfter, '改答案后抑郁行仍在');
+check(Math.abs(Number(depRowAfter.children[2].textContent) - 4.2) <= 0.08, '重分配后抑郁均分仍 ≈ 4.2');
+const marks = [...$('answers').querySelectorAll('.slide-mark')];
+check(marks.length === 90, '90 题都标出了可行区间', `${marks.length}`);
+
+/* 题库状态显示区间/锁定，而非一律「自由」 ------------------------------ */
+const bankStatuses = [...$('bank-table').querySelectorAll('tbody tr')]
+  .map((r) => (r.children[4] ? r.children[4].textContent : ''))
+  .filter(Boolean);
+check(bankStatuses.some((t) => /可调|锁定/.test(t)), '题库状态显示区间/锁定', bankStatuses.slice(0, 3).join(' | '));
+check(!bankStatuses.some((t) => t === '自由'), 'SCL-90 题库不再显示「自由」');
 
 console.log(`\n${failures === 0 ? 'ALL OK' : failures + ' FAILURES'}`);
 process.exit(failures === 0 ? 0 : 1);

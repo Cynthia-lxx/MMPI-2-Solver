@@ -100,6 +100,9 @@ export function scl90Score(answers) {
 /**
  * 反推作答：给定「因子名 -> 目标均值」求解一份答卷。
  * 因子间互不重叠，逐因子独立精确求解；未指定的因子默认全答「没有」。
+ *
+ * 每题取 base 或 base+1（均匀分配），这样生成的答卷在滑杆上看起来是
+ * 「一条平直的带子」，不会出现前几题虚高、后几题全低的怪异分布。
  */
 export function scl90Solve(targets = {}) {
   const n = SCL90_DATA.nItems;
@@ -121,33 +124,94 @@ export function scl90Solve(targets = {}) {
     const targetMean = Math.max(1, Math.min(5, Number(mean)));
     const targetSum = Math.round(targetMean * ni);
 
-    // 基础全答「没有」(score 1 => raw = ni)，再按残差增减到目标 raw
-    let residual = targetSum - ni;
-    const levels = items.map(() => 0);
-    let idx = 0;
-    const guard = ni * 5 + 1;
-    while (residual > 0 && idx < guard) {
-      if (levels[idx % ni] < 4) {
-        levels[idx % ni] += 1;
-        residual -= 1;
-      }
-      idx += 1;
-    }
-    while (residual < 0 && idx < guard) {
-      if (levels[idx % ni] > 0) {
-        levels[idx % ni] -= 1;
-        residual += 1;
-      }
-      idx += 1;
-    }
+    // 均匀分配：前 rem 题多答一级，其余答 base 级
+    const base = Math.floor(targetSum / ni);
+    const rem = targetSum - base * ni;
     items.forEach((it, k) => {
-      answers[it - 1] = levels[k];
+      const score = base + (k < rem ? 1 : 0);
+      answers[it - 1] = Math.max(0, Math.min(4, score - 1));
     });
     const got = items.reduce((s, it) => s + levelToScore(answers[it - 1]), 0) / ni;
     achieved[name] = got;
   }
 
   return { answers, achieved, requested, feasible: true, nItems: n };
+}
+
+/**
+ * 每道题在当前目标下的「可行级别区间」（0..4）。
+ *
+ * 对某因子 n 题、目标均值 m，目标总分 S = round(m·n)。单题得分 v 可行的
+ * 充要条件是其余 n-1 题能凑出 S-v，即：
+ *     n-1 ≤ S-v ≤ 5(n-1)  ⇒  v ∈ [max(1, S-5(n-1)), min(5, S-(n-1))]
+ * 换成内部级别再减 1。未设目标的因子整段自由（0..4）。
+ *
+ * 返回数组下标 1..90（0 占位），每项 { lo, hi }。
+ */
+export function scl90FeasibleBounds(targets = {}) {
+  const n = SCL90_DATA.nItems;
+  const bounds = new Array(n + 1);
+  for (let i = 1; i <= n; i += 1) bounds[i] = { lo: 0, hi: 4 };
+
+  for (const f of SCL90_DATA.scales) {
+    if (isAggregate(f)) continue;
+    const ni = f.bind.length;
+    const m = targets[f.name];
+    if (m === undefined || m === null) continue;
+    const targetMean = Math.max(1, Math.min(5, Number(m)));
+    const sum = Math.round(targetMean * ni);
+    const lo = Math.max(1, sum - 5 * (ni - 1));
+    const hi = Math.min(5, sum - (ni - 1));
+    for (const it of f.bind) bounds[it] = { lo: lo - 1, hi: hi - 1 };
+  }
+  return bounds;
+}
+
+/**
+ * 把某题设成指定级别，并在**同一因子内**自动重分配其余题目，使该因子总分
+ * （也就是目标均值）保持不变。尽量少改动其它题：只把差额逐题 ±1 补上。
+ *
+ * 若该题所属因子没有目标，则直接设值、不重分配。
+ * 传入的 level 会被夹到该题的可行区间内。
+ */
+export function scl90SetItemLevel(answers, targets, item, level) {
+  const next = answers.slice();
+  const factor = SCL90_DATA.scales.find(
+    (f) => !isAggregate(f) && f.bind.includes(item)
+  );
+  if (!factor) {
+    next[item - 1] = Math.max(0, Math.min(4, Number(level)));
+    return next;
+  }
+  const ni = factor.bind.length;
+  const m = targets ? targets[factor.name] : undefined;
+  if (m === undefined || m === null) {
+    next[item - 1] = Math.max(0, Math.min(4, Number(level)));
+    return next;
+  }
+  const sum = Math.round(Math.max(1, Math.min(5, Number(m))) * ni);
+  const lo = Math.max(0, Math.max(1, sum - 5 * (ni - 1)) - 1);
+  const hi = Math.min(4, Math.min(5, sum - (ni - 1)) - 1);
+  next[item - 1] = Math.max(lo, Math.min(hi, Number(level)));
+
+  // 其余题目的总分补到 sum，尽量少改动（逐题 ±1）
+  const others = factor.bind.filter((it) => it !== item);
+  let total = factor.bind.reduce((s, it) => s + next[it - 1] + 1, 0);
+  let idx = 0;
+  let guard = others.length * 8 + 16;
+  while (total !== sum && guard > 0) {
+    const it = others[idx % others.length];
+    if (total < sum && next[it - 1] < 4) {
+      next[it - 1] += 1;
+      total += 1;
+    } else if (total > sum && next[it - 1] > 0) {
+      next[it - 1] -= 1;
+      total -= 1;
+    }
+    idx += 1;
+    guard -= 1;
+  }
+  return next;
 }
 
 /**
@@ -162,6 +226,7 @@ export function scl90TargetScales() {
       name: f.name,
       fullName: f.fullName,
       family: 'factor',
+      n: f.bind.length,
       presets: f.bands.map((b, i) => ({
         label: b.severity,
         mean: (PRESET_MEAN[f.bands.length] || PRESET_MEAN[3])[i] ?? (b.min + b.max) / 2,

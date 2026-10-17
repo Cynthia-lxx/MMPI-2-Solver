@@ -5,6 +5,8 @@ import {
   scl90TargetScales,
   scl90ParseAnswers,
   scl90ExportCsv,
+  scl90FeasibleBounds,
+  scl90SetItemLevel,
   levelToScore,
 } from './scl90.js';
 
@@ -84,6 +86,37 @@ const ok = (cond, label, extra = '') => {
   const ts = scl90TargetScales();
   ok(ts.length === 10, '可设目标因子 = 10（9 临床 + 其他）', `${ts.length}`);
   ok(ts[0].presets.length === 3, '躯体化有 3 段预设', `${ts[0].presets.map((p) => p.label).join('/')}`);
+  ok(ts.every((t) => Number.isInteger(t.n) && t.n > 0), '每个因子都带题数 n（供列出全部可达均分）');
+}
+
+// 7) 每题可行区间 + 同因子重分配守恒
+{
+  const dep = SCL90_DATA.scales.find((f) => f.name === '抑郁');
+  const targets = { 抑郁: 4.2 };
+  const bounds = scl90FeasibleBounds(targets);
+  ok(dep.bind.every((it) => bounds[it].lo === 0 && bounds[it].hi === 4), '抑郁 4.2 → 每题可行区间 1–5');
+  // 目标接近满分时下界收窄
+  const extreme = scl90FeasibleBounds({ 抑郁: 4.9 });
+  ok(dep.bind.every((it) => extreme[it].lo > 0), '抑郁 4.9 → 区间下界收窄（非全自由）', `lo=${extreme[dep.bind[0]].lo}`);
+  // 未指定因子保持整段自由
+  const other = SCL90_DATA.scales.find((f) => f.name === '敌对');
+  ok(other.bind.every((it) => bounds[it].lo === 0 && bounds[it].hi === 4), '未指定因子仍为 1–5');
+
+  // 把首题拉到最低，同因子其余题自动补足，总分守恒
+  const r = scl90Solve(targets);
+  const next = scl90SetItemLevel(r.answers, targets, dep.bind[0], 0);
+  const sum = dep.bind.reduce((s, it) => s + next[it - 1] + 1, 0);
+  const want = Math.round(4.2 * dep.bind.length);
+  ok(sum === want, '改一题后同因子总分守恒', `${sum} vs ${want}`);
+  ok(dep.bind.every((it) => next[it - 1] >= 0 && next[it - 1] <= 4), '重分配后级别仍在 0–4');
+  // 其他因子不受影响
+  const untouched = SCL90_DATA.scales
+    .filter((f) => f.name !== '抑郁' && !(f.bind.length === 1 && f.bind[0] === 0))
+    .every((f) => f.bind.every((it) => next[it - 1] === r.answers[it - 1]));
+  ok(untouched, '重分配只影响本因子');
+  // 越界等级被夹到可行区间
+  const clamped = scl90SetItemLevel(r.answers, targets, dep.bind[0], 99);
+  ok(clamped[dep.bind[0] - 1] <= 4, '越界等级被夹住');
 }
 
 console.log(`\n${fails === 0 ? 'ALL OK' : fails + ' FAILURES'}`);

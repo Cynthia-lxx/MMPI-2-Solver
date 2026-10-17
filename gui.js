@@ -43,6 +43,8 @@ import {
   scl90TargetScales,
   scl90ParseAnswers,
   scl90ExportCsv,
+  scl90FeasibleBounds,
+  scl90SetItemLevel,
   levelToScore,
 } from './scl90.js';
 
@@ -924,6 +926,12 @@ function onTargetChanged(event) {
     return;
   }
   const value = Number(event.target.value);
+  if (isScl90()) {
+    // SCL-90 的目标就是因子均分，直接作为点目标
+    state.targets[name] = { lo: value, hi: value };
+    refreshSolveButton();
+    return;
+  }
   const edge = event.target.dataset.edge || 'point';
   const option = optionsFor(state.isMale, state.correctInconsistency)
     .find((o) => o.name === name);
@@ -1159,6 +1167,172 @@ function refreshFreedom() {
   });
 }
 
+/* -- 多级作答滑杆 ---------------------------------------------------- */
+
+// 滑轨分块配色：冷 → 暖。级别数不超过调色板长度时直接用调色板；
+// 更长的量表（如 1~100）按色相线性插值，避免色板不够用。
+const LEVEL_COLORS = ['#4caf7d', '#9ccc65', '#fbc02d', '#fb8c00', '#e53935', '#8e24aa', '#5e35b1'];
+
+function levelColor(n, i) {
+  if (n <= LEVEL_COLORS.length) return LEVEL_COLORS[i];
+  const t = n <= 1 ? 0 : i / (n - 1);
+  return `hsl(${Math.round(130 * (1 - t))} 72% 55%)`;
+}
+
+/** 生成滑轨背景：n 级切成 n 块，每块一个固定颜色（长量表用平滑渐变）。 */
+function trackGradient(n) {
+  if (n <= 20) {
+    const stops = [];
+    for (let i = 0; i < n; i += 1) {
+      const a = (i / n) * 100;
+      const b = ((i + 1) / n) * 100;
+      stops.push(`${levelColor(n, i)} ${a.toFixed(3)}% ${b.toFixed(3)}%`);
+    }
+    return `linear-gradient(90deg, ${stops.join(', ')})`;
+  }
+  const stops = [];
+  for (let k = 0; k <= 10; k += 1) {
+    const t = k / 10;
+    stops.push(`${levelColor(n, Math.round(t * (n - 1)))} ${(t * 100).toFixed(2)}%`);
+  }
+  return `linear-gradient(90deg, ${stops.join(', ')})`;
+}
+
+/** 级别 -> 滑轨百分比位置（取块中心）。 */
+function levelLeft(n, lvl) {
+  return n <= 1 ? 0 : ((lvl + 0.5) / n) * 100;
+}
+
+/** 就地重绘某题滑杆的滑块与数值文本（拖动时用，避免整表重建）。 */
+function paintSlider(cell, level, levels) {
+  if (!cell) return;
+  const n = levels.length;
+  const thumb = cell.querySelector('.slide-thumb');
+  if (thumb) thumb.style.left = `${levelLeft(n, level)}%`;
+  const val = cell.querySelector('.slide-val');
+  if (val) val.textContent = `${level + 1} · ${levels[level]?.label || ''}`;
+  const track = cell.querySelector('.slide-track');
+  if (track) track.setAttribute('aria-valuenow', String(level + 1));
+}
+
+/** 指针横坐标 -> 级别（按块取整）。 */
+function sliderLevelAt(track, clientX) {
+  const rect = track.getBoundingClientRect();
+  const n = Number(track.dataset.n);
+  const ratio = rect.width ? (clientX - rect.left) / rect.width : 0;
+  return Math.min(n - 1, Math.max(0, Math.floor(ratio * n)));
+}
+
+// 滑杆拖动状态（同一时刻只拖一个）
+let scl90Drag = null;
+
+/** 提交某题的新级别：同因子内自动重分配，保持目标均值不变。 */
+function commitScl90Item(item, startLevel) {
+  if (!state.plan) return;
+  const level = state.answers[item - 1];
+  if (level === startLevel) return;
+  state.answers = scl90SetItemLevel(state.answers, state.plan.target, item, level);
+  state.plan.answers = state.answers;
+  const scores = scl90Score(state.answers);
+  state.plan.scores = scores;
+  state.plan.profile = scores;
+  renderScl90TargetTable(state.plan);
+  renderScl90Profile(scores);
+  renderAnswers(state.plan);
+  renderItemBank();
+}
+
+/**
+ * 指针按下：先只记录起点，不立即改值。
+ * 触屏上允许纵向滑动页面（touch-action: pan-y），只有明显的横向拖动才接管。
+ */
+function onSliderDown(event) {
+  const track = event.target.closest ? event.target.closest('.slide-track') : null;
+  if (!track || !state.plan || !isScl90()) return;
+  const item = Number(track.dataset.item);
+  const n = Number(track.dataset.n);
+  const levels = itemFormatDesc(currentData(), item).levels || [];
+  const b = state.plan.itemBounds && state.plan.itemBounds[item]
+    ? state.plan.itemBounds[item]
+    : { lo: 0, hi: n - 1 };
+  const lo = Math.max(0, Math.min(n - 1, b.lo));
+  const hi = Math.max(lo, Math.min(n - 1, b.hi));
+  scl90Drag = {
+    item, track, n, levels, lo, hi,
+    start: state.answers[item - 1],
+    startX: event.clientX,
+    startY: event.clientY,
+    active: false,
+    pointerId: event.pointerId,
+  };
+  try {
+    track.setPointerCapture(event.pointerId);
+  } catch {
+    /* 旧浏览器没有指针捕获，退化为普通事件 */
+  }
+}
+
+function onSliderMove(event) {
+  if (!scl90Drag) return;
+  const drag = scl90Drag;
+  const { track, lo, hi, item, levels } = drag;
+  if (!drag.active) {
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    // 纵向意图超过横向：放行页面滚动，放弃这次拖动
+    if (Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx)) {
+      scl90Drag = null;
+      return;
+    }
+    if (Math.abs(dx) < 6) return; // 还没形成横向拖动
+    drag.active = true;
+  }
+  const level = Math.max(lo, Math.min(hi, sliderLevelAt(track, event.clientX)));
+  if (level === state.answers[item - 1]) return;
+  state.answers[item - 1] = level;
+  paintSlider(track.closest('.cell'), level, levels);
+}
+
+function onSliderUp(event) {
+  if (!scl90Drag) return;
+  const drag = scl90Drag;
+  scl90Drag = null;
+  if (!drag.active) {
+    // 未形成拖动，按一次点击处理：直接落到落点所在档
+    const level = Math.max(drag.lo, Math.min(drag.hi, sliderLevelAt(drag.track, event.clientX)));
+    state.answers[drag.item - 1] = level;
+    paintSlider(drag.track.closest('.cell'), level, drag.levels);
+  }
+  commitScl90Item(drag.item, drag.start);
+}
+
+/** 键盘可访问：方向键 / Home / End 在可行区间内逐级调整。 */
+function onSliderKey(event) {
+  if (!isScl90() || !state.plan) return;
+  const track = event.target.closest ? event.target.closest('.slide-track') : null;
+  if (!track) return;
+  const key = event.key;
+  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(key)) return;
+  event.preventDefault();
+  const item = Number(track.dataset.item);
+  const n = Number(track.dataset.n);
+  const b = state.plan.itemBounds && state.plan.itemBounds[item]
+    ? state.plan.itemBounds[item]
+    : { lo: 0, hi: n - 1 };
+  const lo = Math.max(0, Math.min(n - 1, b.lo));
+  const hi = Math.max(lo, Math.min(n - 1, b.hi));
+  const cur = state.answers[item - 1] ?? 0;
+  let next = cur;
+  if (key === 'ArrowLeft' || key === 'ArrowDown') next = cur - 1;
+  else if (key === 'ArrowRight' || key === 'ArrowUp') next = cur + 1;
+  else if (key === 'Home') next = lo;
+  else if (key === 'End') next = hi;
+  next = Math.max(lo, Math.min(hi, next));
+  if (next === cur) return;
+  state.answers[item - 1] = next;
+  commitScl90Item(item, cur);
+}
+
 function renderAnswers(plan) {
   const parts = [];
   const showText = dom.showText ? dom.showText.checked : false;
@@ -1195,27 +1369,55 @@ function renderAnswers(plan) {
           '</div>'
       );
     } else {
-      // 多级作答（Likert / Choice）：渲染级别按钮，待未来非 TF 量表启用
-      const lvl = state.answers[item - 1];
-      const btns = desc.levels.map((lv) =>
-        `<button type="button" class="lvl${lv.value === lvl ? ' on' : ''}" ` +
-        `data-item="${item}" data-level="${lv.value}" title="${escapeAttr(lv.label)}">${lv.value + 1}</button>`
-      ).join('');
+      // 多级作答（Likert / Choice）：滑杆，滑轨按选项数分块着色
+      const levels = desc.levels;
+      const n = levels.length;
+      const lvl = Math.max(0, Math.min(n - 1, state.answers[item - 1] ?? 0));
+      const b = isScl90() && plan.itemBounds && plan.itemBounds[item]
+        ? plan.itemBounds[item]
+        : { lo: 0, hi: n - 1 };
+      const lo = Math.max(0, Math.min(n - 1, b.lo));
+      const hi = Math.max(lo, Math.min(n - 1, b.hi));
+      const markLeft = n <= 1 ? 0 : (lo / n) * 100;
+      const markWidth = n <= 1 ? 100 : ((hi - lo + 1) / n) * 100;
       parts.push(
-        `<div class="cell multi ${free ? 'free' : 'locked'}${slacky ? ' slack' : ''}" ` +
-          `data-item="${item}" title="${escapeAttr(title)}">` +
-          `<span class="n">${item}</span><span class="lvls">${btns}</span>` +
+        `<div class="cell slide ${free ? 'free' : 'locked'}" data-item="${item}" title="${escapeAttr(title)}">` +
+          `<div class="slide-top"><span class="n">${item}</span>` +
+          `<span class="slide-val">${lvl + 1} · ${escapeHtml(levels[lvl]?.label || '')}</span></div>` +
+          `<div class="slide-track" data-item="${item}" data-n="${n}" role="slider" tabindex="0" ` +
+            `aria-label="第 ${item} 题" aria-valuemin="1" aria-valuemax="${n}" aria-valuenow="${lvl + 1}" ` +
+            `aria-valuetext="${escapeAttr(levels[lvl]?.label || '')}" ` +
+            `style="background:${trackGradient(n)}">` +
+            `<span class="slide-mark" style="left:${markLeft}%;width:${markWidth}%"></span>` +
+            `<span class="slide-thumb" style="left:${levelLeft(n, lvl)}%"></span>` +
+          '</div>' +
           (showText ? `<span class="q">${questionHtml(text, lang)}</span>` : '') +
-          '</div>'
+        '</div>'
       );
     }
   }
   dom.answers.innerHTML = parts.join('');
   dom.answers.classList.toggle('with-text', showText);
-  const slackCount = plan.slackItems ? plan.slackItems.length : 0;
-  dom.freeCount.textContent =
-    `自由题 ${plan.freeItems.length} 道 · ${combinationLabel(plan.freeItems.length)}` +
-    (slackCount ? `；另有 ${slackCount} 道在区间内可翻转` : '');
+  if (isScl90()) {
+    let freeN = 0;
+    let lockN = 0;
+    const b = plan.itemBounds;
+    if (b) {
+      for (let i = 1; i <= currentData().nItems; i += 1) {
+        if (b[i].lo < b[i].hi) freeN += 1;
+        else lockN += 1;
+      }
+    } else {
+      freeN = plan.freeItems ? plan.freeItems.length : 0;
+      lockN = plan.lockedItems ? plan.lockedItems.length : 0;
+    }
+    dom.freeCount.textContent = `锁定 ${lockN} 题 · 区间可调 ${freeN} 题`;
+  } else {
+    const slackCount = plan.slackItems ? plan.slackItems.length : 0;
+    dom.freeCount.textContent =
+      `自由题 ${plan.freeItems.length} 道 · ${combinationLabel(plan.freeItems.length)}` +
+      (slackCount ? `；另有 ${slackCount} 道在区间内可翻转` : '');
+  }
 }
 
 /**
@@ -1248,11 +1450,24 @@ function renderItemBank() {
     const answer = state.answers
       ? (isScl90() ? levelToScore(state.answers[item - 1]) : (state.answers[item - 1] ? 'T' : 'F'))
       : null;
-    const free = plan ? (isScl90() ? true : !!state.freedom[item]) : null;
+    const bound = plan && isScl90() && plan.itemBounds ? plan.itemBounds[item] : null;
+    const free = plan
+      ? (isScl90() ? (bound ? bound.lo < bound.hi : true) : !!state.freedom[item])
+      : null;
     if (filter === 'free' && !free) continue;
     if (filter === 'locked' && free !== false) continue;
     if (filter === 't' && answer !== 'T') continue;
     if (filter === 'f' && answer !== 'F') continue;
+    let statusText = '—';
+    if (free !== null) {
+      if (isScl90()) {
+        statusText = free
+          ? (bound ? `可调 ${bound.lo + 1}–${bound.hi + 1}` : '可调')
+          : (bound ? `锁定 ${bound.lo + 1}` : '锁定');
+      } else {
+        statusText = free ? '自由' : '锁定';
+      }
+    }
     shown += 1;
     rows.push(
       `<tr data-item="${item}" class="${free === false ? 'locked' : ''}">` +
@@ -1260,8 +1475,7 @@ function renderItemBank() {
       `<td class="orig">${escapeHtml(text.en)}</td>` +
       `<td class="zh">${escapeHtml(text.zh)}</td>` +
       `<td class="ans ${answer === null ? 'dim' : answer === 'T' ? 'is-t' : isScl90() ? 'is-lvl' : 'is-f'}">${answer || '—'}</td>` +
-      `<td class="st ${free === null ? 'dim' : free ? 'free' : 'locked'}">` +
-      `${free === null ? '—' : free ? '自由' : '锁定'}</td>` +
+      `<td class="st ${free === null ? 'dim' : free ? 'free' : 'locked'}">${statusText}</td>` +
       '</tr>'
     );
   }
@@ -1500,11 +1714,13 @@ function runImport() {
     }
     const answers = parsed.answers.map((a) => (a === null ? 0 : a));
     const scores = scl90Score(answers);
+    const itemBounds = scl90FeasibleBounds({});
     const plan = {
       scale: 'scl90',
       answers,
       scores,
       profile: scores,
+      itemBounds,
       freedom: new Array(SCL90_DATA.nItems + 1).fill(true),
       freeItems: [...Array(SCL90_DATA.nItems).keys()].map((i) => i + 1),
       slack: new Array(SCL90_DATA.nItems + 1).fill(false),
@@ -1723,6 +1939,12 @@ function wire() {
   });
 
   dom.answers.addEventListener('click', onAnswerClick);
+  // 多级作答滑杆：指针拖动 + 键盘
+  dom.answers.addEventListener('pointerdown', onSliderDown);
+  dom.answers.addEventListener('pointermove', onSliderMove);
+  dom.answers.addEventListener('keydown', onSliderKey);
+  window.addEventListener('pointerup', onSliderUp);
+  window.addEventListener('pointercancel', onSliderUp);
 
   if (dom.exportRunPanel) {
     dom.exportRunPanel.addEventListener('click', runExport);
@@ -1773,23 +1995,31 @@ function buildScl90ScaleList() {
   const scales = scl90TargetScales();
   const html = scales
     .map((s) => {
-      const options = s.presets
+      // 先放 3 个严重度预设，再列出该因子全部可达均分（步长 1/题数）
+      const presetOpts = s.presets
         .map((p) => `<option value="${p.mean}">${p.label}（均分≈${p.mean}）</option>`)
         .join('');
-      const current = state.targets[s.name];
-      const sel = current ? String(current.lo) : '';
+      const allOpts = [];
+      for (let k = s.n; k <= s.n * 5; k += 1) {
+        const mean = k / s.n;
+        allOpts.push(`<option value="${mean.toFixed(3)}">${mean.toFixed(2)}</option>`);
+      }
       return (
-        `<div class="row" data-name="${s.name}" data-search="${s.name.toLowerCase()}">` +
+        `<div class="row scl-row" data-name="${s.name}" data-search="${s.name.toLowerCase()}">` +
         `<span class="abbr" title="${s.fullName}">${s.name}</span>` +
         `<select data-name="${s.name}" data-edge="point">` +
-        `<option value="">—</option>${options}</select>` +
+        `<option value="">—</option>` +
+        `<optgroup label="严重度预设">${presetOpts}</optgroup>` +
+        `<optgroup label="全部可达均分">${allOpts.join('')}</optgroup>` +
+        `</select>` +
         `<span class="full">${s.fullName}</span></div>`
       );
     })
     .join('');
   dom.scaleList.innerHTML = `<div class="rows">${html}</div>`;
   for (const select of dom.scaleList.querySelectorAll('select')) {
-    select.value = '';
+    const current = state.targets[select.dataset.name];
+    select.value = current ? String(current.lo) : '';
     select.addEventListener('change', onTargetChanged);
   }
   applySearch();
@@ -1801,9 +2031,16 @@ function runScl90Plan(targets) {
   const r = scl90Solve(means);
   const scores = scl90Score(r.answers);
   const n = SCL90_DATA.nItems;
+  const itemBounds = scl90FeasibleBounds(means);
   const freedom = new Array(n + 1).fill(true);
   const freeItems = [];
-  for (let i = 1; i <= n; i += 1) freeItems.push(i);
+  const lockedItems = [];
+  for (let i = 1; i <= n; i += 1) {
+    const b = itemBounds[i];
+    const isFree = b.lo < b.hi;
+    freedom[i] = isFree;
+    (isFree ? freeItems : lockedItems).push(i);
+  }
   const bounds = {};
   for (const [name, m] of Object.entries(means)) bounds[name] = { lo: m, hi: m };
   const plan = {
@@ -1818,9 +2055,10 @@ function runScl90Plan(targets) {
     hasRange: false,
     freedom,
     freeItems,
+    itemBounds,
     slack: new Array(n + 1).fill(false),
     slackItems: [],
-    lockedItems: [],
+    lockedItems,
     lockReason: new Map(),
     profile: scores,
     rawByName: {},
@@ -1843,7 +2081,11 @@ function runScl90Plan(targets) {
 
 function renderStatusScl90(plan) {
   const n = Object.keys(plan.target).length;
-  dom.status.textContent = `已生成答卷：命中 ${n} 个因子目标（精确求解，耗时 0 ms）。`;
+  const lockN = plan.lockedItems ? plan.lockedItems.length : 0;
+  const freeN = plan.freeItems ? plan.freeItems.length : SCL90_DATA.nItems;
+  dom.status.textContent =
+    `已生成答卷：命中 ${n} 个因子目标（精确求解，耗时 0 ms）；` +
+    `锁定 ${lockN} 题、区间可调 ${freeN} 题。`;
   dom.status.className = 'status ok';
 }
 
@@ -1898,12 +2140,14 @@ function switchScale(value) {
   const leftH2 = panel ? panel.querySelector('h2') : null;
   const hTarget = document.getElementById('h-target');
   const hAnswers = document.getElementById('h-answers');
+  const hBank = document.getElementById('h-bank');
   if (isScl90()) {
     if (h1) h1.textContent = 'SCL-90 自评量表';
     if (hp) hp.textContent = '选择各因子的目标严重度，反推出一份 90 题作答；或直接导入、编辑并评分。';
     if (leftH2) leftH2.textContent = '目标因子均分';
     if (hTarget) hTarget.textContent = '因子均分达成';
     if (hAnswers) hAnswers.textContent = '90 题回答';
+    if (hBank) hBank.textContent = '题库（90 题原文）';
     if (dom.copy) dom.copy.textContent = '复制得分串';
     setNote('已切换到 SCL-90。选定因子严重度后点「生成答卷」。');
   } else {
@@ -1912,6 +2156,7 @@ function switchScale(value) {
     if (leftH2) leftH2.textContent = '目标 T 分';
     if (hTarget) hTarget.textContent = '目标达成';
     if (hAnswers) hAnswers.textContent = '567 题回答';
+    if (hBank) hBank.textContent = '题库（567 题原文）';
     if (dom.copy) dom.copy.textContent = '复制 T/F';
   }
   buildScaleList();
