@@ -1499,6 +1499,15 @@ function renderAnswers(plan) {
   }
   dom.answers.innerHTML = parts.join('');
   dom.answers.classList.toggle('with-text', showText);
+  // 答案区动效：小题本逐格错峰浮现，大题本（如 MMPI 567）整体滑入以保性能
+  if (currentData().nItems <= 120) {
+    dom.answers.querySelectorAll('.cell').forEach((c, i) => {
+      c.classList.add('cell-in');
+      c.style.animationDelay = `${Math.min(i, 28) * 9}ms`;
+    });
+  } else {
+    flashIn(dom.answers);
+  }
   if (!isBinary()) {
     let freeN = 0;
     let lockN = 0;
@@ -1653,6 +1662,7 @@ function onAnswerClick(event) {
   cell.querySelector('b').textContent = answer;
   cell.classList.toggle('is-t', state.answers[item - 1]);
   cell.classList.toggle('is-f', !state.answers[item - 1]);
+  popCell(cell);
   if (isSlack) {
     // the flip moved a targeted scale, so the free / slack split is stale
     refreshFreedom();
@@ -2388,6 +2398,22 @@ function renderLikertProfile(input) {
     `<table><thead><tr><th>因子</th><th>均分/总分</th><th>解释</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+/** 重启一个 CSS 动画（移除类→强制重排→加回），让区块切换/重建时有滑入反馈 */
+function flashIn(el, cls = 'content-in') {
+  if (!el) return;
+  el.classList.remove(cls);
+  void el.offsetWidth; // 强制重排以重启动画
+  el.classList.add(cls);
+}
+
+/** 答案格被点击翻转时的弹跳反馈 */
+function popCell(cell) {
+  if (!cell) return;
+  cell.classList.remove('cell-pop');
+  void cell.offsetWidth;
+  cell.classList.add('cell-pop');
+}
+
 async function switchScale(value) {
   state.scale = value;
   state.targets = {};
@@ -2456,6 +2482,11 @@ async function switchScale(value) {
   buildExportPanel();
   applyScaleCopy();
   invalidate('已切换量表，请重新选择目标。');
+  // 切换量表：内容区块轻微滑入
+  flashIn(dom.scaleList);
+  flashIn(dom.answers);
+  flashIn(dom.profile);
+  flashIn(dom.bankTable ? dom.bankTable.closest('.bank-wrap') : null);
 }
 
 export function init() {
@@ -2679,6 +2710,11 @@ function renderTypologyAnswers(plan) {
   }
   dom.answers.innerHTML = parts.join('');
   dom.answers.classList.toggle('with-text', showText);
+  // MBTI 作答格逐格错峰浮现（上限封顶，避免大题本拖太久）
+  dom.answers.querySelectorAll('.cell').forEach((c, i) => {
+    c.classList.add('cell-in');
+    c.style.animationDelay = `${Math.min(i, 30) * 10}ms`;
+  });
   dom.freeCount.textContent = `${data.nItems} 题（点击切换 A/B）`;
 }
 

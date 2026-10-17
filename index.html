@@ -79,6 +79,36 @@
     --q-ink: #c3c9d6;
     --busy-bg: #16223a;
   }
+
+  /* ============ 动效（仿 MtF.wiki 的简洁而有动感风格；尊重减弱动效偏好） ============ */
+  @media (prefers-reduced-motion: no-preference) {
+    @keyframes appIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+    @keyframes contentIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    @keyframes cellIn { from { opacity: 0; transform: scale(.82); } to { opacity: 1; transform: scale(1); } }
+    @keyframes cellPop { 0% { transform: scale(1); } 45% { transform: scale(1.16); } 100% { transform: scale(1); } }
+    @keyframes notePulse { 0% { box-shadow: 0 0 0 0 var(--accent-soft); } 60% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+    /* 首屏入场：页头 → 工具栏 → 面板，轻微错峰上浮 */
+    header { animation: appIn .5s cubic-bezier(.2, .7, .3, 1) both; }
+    .toolbar { animation: appIn .5s cubic-bezier(.2, .7, .3, 1) .08s both; }
+    .panel { animation: appIn .55s cubic-bezier(.2, .7, .3, 1) .14s both; }
+
+    /* 按钮：悬停描边过渡 + 按下微缩 */
+    button { transition: transform .12s ease, border-color .15s ease, color .15s ease, background-color .15s ease, box-shadow .15s ease; }
+    button:active:not(:disabled) { transform: scale(.96); }
+    button.primary:active:not(:disabled) { transform: scale(.97); }
+
+    /* 答案格：悬停轻抬；A/B 翻转有弹跳 */
+    .cell { transition: transform .14s ease, background-color .18s ease, box-shadow .18s ease; }
+    .cell:hover { transform: translateY(-1px); }
+    .cell.typ:hover { transform: translateY(-1px) scale(1.02); }
+    .cell-in { animation: cellIn .3s ease both; }
+    .cell-pop { animation: cellPop .32s ease; }
+
+    /* 区块切换时的轻微滑入；状态达成时的脉冲提示 */
+    .content-in { animation: contentIn .35s cubic-bezier(.2, .7, .3, 1) both; }
+    .status.ok { animation: notePulse .5s ease both; }
+  }
   * { box-sizing: border-box; }
   body {
     margin: 0;
@@ -5224,6 +5254,15 @@ function renderAnswers(plan) {
   }
   dom.answers.innerHTML = parts.join('');
   dom.answers.classList.toggle('with-text', showText);
+  // 答案区动效：小题本逐格错峰浮现，大题本（如 MMPI 567）整体滑入以保性能
+  if (currentData().nItems <= 120) {
+    dom.answers.querySelectorAll('.cell').forEach((c, i) => {
+      c.classList.add('cell-in');
+      c.style.animationDelay = `${Math.min(i, 28) * 9}ms`;
+    });
+  } else {
+    flashIn(dom.answers);
+  }
   if (!isBinary()) {
     let freeN = 0;
     let lockN = 0;
@@ -5378,6 +5417,7 @@ function onAnswerClick(event) {
   cell.querySelector('b').textContent = answer;
   cell.classList.toggle('is-t', state.answers[item - 1]);
   cell.classList.toggle('is-f', !state.answers[item - 1]);
+  popCell(cell);
   if (isSlack) {
     // the flip moved a targeted scale, so the free / slack split is stale
     refreshFreedom();
@@ -6113,6 +6153,22 @@ function renderLikertProfile(input) {
     `<table><thead><tr><th>因子</th><th>均分/总分</th><th>解释</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+/** 重启一个 CSS 动画（移除类→强制重排→加回），让区块切换/重建时有滑入反馈 */
+function flashIn(el, cls = 'content-in') {
+  if (!el) return;
+  el.classList.remove(cls);
+  void el.offsetWidth; // 强制重排以重启动画
+  el.classList.add(cls);
+}
+
+/** 答案格被点击翻转时的弹跳反馈 */
+function popCell(cell) {
+  if (!cell) return;
+  cell.classList.remove('cell-pop');
+  void cell.offsetWidth;
+  cell.classList.add('cell-pop');
+}
+
 async function switchScale(value) {
   state.scale = value;
   state.targets = {};
@@ -6181,6 +6237,11 @@ async function switchScale(value) {
   buildExportPanel();
   applyScaleCopy();
   invalidate('已切换量表，请重新选择目标。');
+  // 切换量表：内容区块轻微滑入
+  flashIn(dom.scaleList);
+  flashIn(dom.answers);
+  flashIn(dom.profile);
+  flashIn(dom.bankTable ? dom.bankTable.closest('.bank-wrap') : null);
 }
 
 function init() {
@@ -6404,6 +6465,11 @@ function renderTypologyAnswers(plan) {
   }
   dom.answers.innerHTML = parts.join('');
   dom.answers.classList.toggle('with-text', showText);
+  // MBTI 作答格逐格错峰浮现（上限封顶，避免大题本拖太久）
+  dom.answers.querySelectorAll('.cell').forEach((c, i) => {
+    c.classList.add('cell-in');
+    c.style.animationDelay = `${Math.min(i, 30) * 10}ms`;
+  });
   dom.freeCount.textContent = `${data.nItems} 题（点击切换 A/B）`;
 }
 
