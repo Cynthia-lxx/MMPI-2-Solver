@@ -468,8 +468,8 @@
           <option value="all">全部</option>
           <option value="free">只看自由题</option>
           <option value="locked">只看锁定题</option>
-          <option value="t">只看作答「是」</option>
-          <option value="f">只看作答「否」</option>
+          <option value="t" class="mmpi2-only">只看作答「是」</option>
+          <option value="f" class="mmpi2-only">只看作答「否」</option>
         </select>
       </label>
       <span class="spacer"></span>
@@ -2944,8 +2944,16 @@ function answerSheet(plan, options = {}) {
     const row = [item, text.zh, answerLabel(data, item, plan.answers[item - 1])];
     if (withEnglish) row.push(text.en);
     if (withLockInfo) {
-      row.push(free ? '自由' : '锁定');
-      row.push(free ? '' : (plan.lockReason.get(item) || []).join('、'));
+      let status = free ? '自由' : '锁定';
+      let affects = free ? '' : (plan.lockReason.get(item) || []).join('、');
+      // SCL-90：状态改为可行区间（锁定=单值）
+      if (data.scale === 'scl90' && plan.itemBounds && plan.itemBounds[item]) {
+        const b = plan.itemBounds[item];
+        status = b.lo < b.hi ? `区间 ${b.lo + 1}–${b.hi + 1}` : `锁定 ${b.lo + 1}`;
+        affects = '';
+      }
+      row.push(status);
+      row.push(affects);
     }
     rows.push(row);
   }
@@ -2954,6 +2962,34 @@ function answerSheet(plan, options = {}) {
     rows,
     widths: withEnglish ? [6, 52, 6, 52, 8, 22] : [6, 60, 6, 8, 22],
   };
+}
+
+/** SCL-90 因子剖面表：均分 + 临床解释（无 T 分概念）。 */
+function scl90ProfileSheet(plan) {
+  const factors = (plan.profile && plan.profile.factors) || {};
+  const diagnoses = (plan.profile && plan.profile.diagnoses) || {};
+  const rows = [['因子', '均分', '解释']];
+  for (const name of Object.keys(factors)) {
+    const f = factors[name];
+    const sev = diagnoses[name] ? diagnoses[name].severity : '';
+    rows.push([name, f.mean.toFixed(2), sev]);
+  }
+  if (plan.profile && typeof plan.profile.total === 'number') {
+    rows.push(['总分', plan.profile.totalMean.toFixed(2), diagnoses['总分'] ? diagnoses['总分'].severity : '']);
+  }
+  return { name: '因子剖面', rows, widths: [12, 10, 22] };
+}
+
+/** SCL-90 目标达成表：各因子目标均分 vs 达成均分 + 偏差。 */
+function scl90TargetSheet(plan) {
+  const rows = [['因子', '目标均分', '达成均分', '偏差']];
+  for (const name of Object.keys(plan.target || {})) {
+    const want = Number(plan.target[name]);
+    const got = Number(plan.achieved[name]);
+    const gap = got - want;
+    rows.push([name, want.toFixed(2), got.toFixed(2), (gap >= 0 ? '+' : '') + gap.toFixed(2)]);
+  }
+  return { name: '因子均分达成', rows, widths: [12, 12, 12, 10] };
 }
 
 function profileSheet(plan, options = {}) {
@@ -3028,8 +3064,16 @@ function buildSheets(plan, options = {}) {
   const out = [];
   for (const id of content) {
     if (id === 'answers' && plan) out.push(answerSheet(plan, { withEnglish, withLockInfo, data }));
-    if (id === 'profile' && plan) out.push(profileSheet(plan, { isMale, data }));
-    if (id === 'targets' && plan) out.push(targetSheet(plan, { isMale, data }));
+    if (id === 'profile' && plan) {
+      out.push(plan.scale === 'scl90'
+        ? scl90ProfileSheet(plan)
+        : profileSheet(plan, { isMale, data }));
+    }
+    if (id === 'targets' && plan) {
+      out.push(plan.scale === 'scl90'
+        ? scl90TargetSheet(plan)
+        : targetSheet(plan, { isMale, data }));
+    }
     if (id === 'template') out.push(blankTemplate({ withEnglish, data }));
   }
   return out;
@@ -4217,7 +4261,11 @@ function setNote(text) {
 function runPlan({ newSeed = false } = {}) {
   const targets = collectTargets();
   if (!Object.keys(targets).length) {
-    setNote('请先在左侧选择至少一个量表的目标 T 分。');
+    setNote(
+      isScl90()
+        ? '请先在左侧为每个因子选择目标严重度（或直接导入作答）。'
+        : '请先在左侧选择至少一个量表的目标 T 分。'
+    );
     return;
   }
   if (isScl90()) {
@@ -4875,11 +4923,21 @@ function downloadBytes(filename, bytes, mime) {
 
 function buildExportPanel() {
   if (!dom.exportContents) return;
-  dom.exportContents.innerHTML = EXPORT_CONTENTS.map(
-    (item) =>
-      `<label class="check"><input type="checkbox" data-content="${item.id}"` +
-      `${item.id === 'answers' ? ' checked' : ''}>${item.label}</label>`
-  ).join('');
+  const items = isScl90()
+    ? [
+        { id: 'answers', label: '答题表（90 题 × 题干 / 得分 / 程度）' },
+        { id: 'profile', label: '因子剖面（9 临床因子 + 其他 + 总分）' },
+        { id: 'targets', label: '因子均分达成（偏差）' },
+        { id: 'template', label: '空白答题模板（供真人作答）' },
+      ]
+    : EXPORT_CONTENTS;
+  dom.exportContents.innerHTML = items
+    .map(
+      (item) =>
+        `<label class="check"><input type="checkbox" data-content="${item.id}"` +
+        `${item.id === 'answers' ? ' checked' : ''}>${item.label}</label>`
+    )
+    .join('');
   dom.exportFormat.innerHTML = EXPORT_FORMATS.map(
     (item) => `<option value="${item.id}">${item.label}</option>`
   ).join('');
@@ -4922,12 +4980,15 @@ function runExport() {
     content: picked,
     withEnglish: dom.exportEnglish.checked,
     withLockInfo: true,
+    data: isScl90() ? SCL90_DATA : MMPI2_DATA,
   });
   if (!sheets.length) {
     setNote('这几项都要先求解；只想拿空白模板的话只勾选它。');
     return;
   }
-  const out = serialize(sheets, dom.exportFormat.value, { basename: 'mmpi2' });
+  const out = serialize(sheets, dom.exportFormat.value, {
+    basename: isScl90() ? 'scl90' : 'mmpi2',
+  });
   if (out.binary) downloadBytes(out.filename, out.body, out.mime);
   else download(out.filename, out.body, out.mime);
   setNote(`已导出 ${out.filename}（${sheets.length} 张表）`);
@@ -5389,6 +5450,7 @@ function switchScale(value) {
     if (dom.copy) dom.copy.textContent = '复制 T/F';
   }
   buildScaleList();
+  buildExportPanel();
   invalidate('已切换量表，请重新选择目标。');
 }
 

@@ -73,8 +73,16 @@ export function answerSheet(plan, options = {}) {
     const row = [item, text.zh, answerLabel(data, item, plan.answers[item - 1])];
     if (withEnglish) row.push(text.en);
     if (withLockInfo) {
-      row.push(free ? '自由' : '锁定');
-      row.push(free ? '' : (plan.lockReason.get(item) || []).join('、'));
+      let status = free ? '自由' : '锁定';
+      let affects = free ? '' : (plan.lockReason.get(item) || []).join('、');
+      // SCL-90：状态改为可行区间（锁定=单值）
+      if (data.scale === 'scl90' && plan.itemBounds && plan.itemBounds[item]) {
+        const b = plan.itemBounds[item];
+        status = b.lo < b.hi ? `区间 ${b.lo + 1}–${b.hi + 1}` : `锁定 ${b.lo + 1}`;
+        affects = '';
+      }
+      row.push(status);
+      row.push(affects);
     }
     rows.push(row);
   }
@@ -83,6 +91,34 @@ export function answerSheet(plan, options = {}) {
     rows,
     widths: withEnglish ? [6, 52, 6, 52, 8, 22] : [6, 60, 6, 8, 22],
   };
+}
+
+/** SCL-90 因子剖面表：均分 + 临床解释（无 T 分概念）。 */
+export function scl90ProfileSheet(plan) {
+  const factors = (plan.profile && plan.profile.factors) || {};
+  const diagnoses = (plan.profile && plan.profile.diagnoses) || {};
+  const rows = [['因子', '均分', '解释']];
+  for (const name of Object.keys(factors)) {
+    const f = factors[name];
+    const sev = diagnoses[name] ? diagnoses[name].severity : '';
+    rows.push([name, f.mean.toFixed(2), sev]);
+  }
+  if (plan.profile && typeof plan.profile.total === 'number') {
+    rows.push(['总分', plan.profile.totalMean.toFixed(2), diagnoses['总分'] ? diagnoses['总分'].severity : '']);
+  }
+  return { name: '因子剖面', rows, widths: [12, 10, 22] };
+}
+
+/** SCL-90 目标达成表：各因子目标均分 vs 达成均分 + 偏差。 */
+export function scl90TargetSheet(plan) {
+  const rows = [['因子', '目标均分', '达成均分', '偏差']];
+  for (const name of Object.keys(plan.target || {})) {
+    const want = Number(plan.target[name]);
+    const got = Number(plan.achieved[name]);
+    const gap = got - want;
+    rows.push([name, want.toFixed(2), got.toFixed(2), (gap >= 0 ? '+' : '') + gap.toFixed(2)]);
+  }
+  return { name: '因子均分达成', rows, widths: [12, 12, 12, 10] };
 }
 
 export function profileSheet(plan, options = {}) {
@@ -157,8 +193,16 @@ export function buildSheets(plan, options = {}) {
   const out = [];
   for (const id of content) {
     if (id === 'answers' && plan) out.push(answerSheet(plan, { withEnglish, withLockInfo, data }));
-    if (id === 'profile' && plan) out.push(profileSheet(plan, { isMale, data }));
-    if (id === 'targets' && plan) out.push(targetSheet(plan, { isMale, data }));
+    if (id === 'profile' && plan) {
+      out.push(plan.scale === 'scl90'
+        ? scl90ProfileSheet(plan)
+        : profileSheet(plan, { isMale, data }));
+    }
+    if (id === 'targets' && plan) {
+      out.push(plan.scale === 'scl90'
+        ? scl90TargetSheet(plan)
+        : targetSheet(plan, { isMale, data }));
+    }
     if (id === 'template') out.push(blankTemplate({ withEnglish, data }));
   }
   return out;

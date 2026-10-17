@@ -988,7 +988,11 @@ function setNote(text) {
 function runPlan({ newSeed = false } = {}) {
   const targets = collectTargets();
   if (!Object.keys(targets).length) {
-    setNote('请先在左侧选择至少一个量表的目标 T 分。');
+    setNote(
+      isScl90()
+        ? '请先在左侧为每个因子选择目标严重度（或直接导入作答）。'
+        : '请先在左侧选择至少一个量表的目标 T 分。'
+    );
     return;
   }
   if (isScl90()) {
@@ -1646,11 +1650,21 @@ function downloadBytes(filename, bytes, mime) {
 
 function buildExportPanel() {
   if (!dom.exportContents) return;
-  dom.exportContents.innerHTML = EXPORT_CONTENTS.map(
-    (item) =>
-      `<label class="check"><input type="checkbox" data-content="${item.id}"` +
-      `${item.id === 'answers' ? ' checked' : ''}>${item.label}</label>`
-  ).join('');
+  const items = isScl90()
+    ? [
+        { id: 'answers', label: '答题表（90 题 × 题干 / 得分 / 程度）' },
+        { id: 'profile', label: '因子剖面（9 临床因子 + 其他 + 总分）' },
+        { id: 'targets', label: '因子均分达成（偏差）' },
+        { id: 'template', label: '空白答题模板（供真人作答）' },
+      ]
+    : EXPORT_CONTENTS;
+  dom.exportContents.innerHTML = items
+    .map(
+      (item) =>
+        `<label class="check"><input type="checkbox" data-content="${item.id}"` +
+        `${item.id === 'answers' ? ' checked' : ''}>${item.label}</label>`
+    )
+    .join('');
   dom.exportFormat.innerHTML = EXPORT_FORMATS.map(
     (item) => `<option value="${item.id}">${item.label}</option>`
   ).join('');
@@ -1693,12 +1707,15 @@ function runExport() {
     content: picked,
     withEnglish: dom.exportEnglish.checked,
     withLockInfo: true,
+    data: isScl90() ? SCL90_DATA : MMPI2_DATA,
   });
   if (!sheets.length) {
     setNote('这几项都要先求解；只想拿空白模板的话只勾选它。');
     return;
   }
-  const out = serialize(sheets, dom.exportFormat.value, { basename: 'mmpi2' });
+  const out = serialize(sheets, dom.exportFormat.value, {
+    basename: isScl90() ? 'scl90' : 'mmpi2',
+  });
   if (out.binary) downloadBytes(out.filename, out.body, out.mime);
   else download(out.filename, out.body, out.mime);
   setNote(`已导出 ${out.filename}（${sheets.length} 张表）`);
@@ -2160,6 +2177,7 @@ function switchScale(value) {
     if (dom.copy) dom.copy.textContent = '复制 T/F';
   }
   buildScaleList();
+  buildExportPanel();
   invalidate('已切换量表，请重新选择目标。');
 }
 
