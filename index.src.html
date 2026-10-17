@@ -240,10 +240,12 @@
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
+    -webkit-text-fill-color: transparent;
   }
-  /* Light theme: the white mid-stop blends into the white panel, so add a hairline stroke for legibility. */
+  /* Light theme: white would vanish on the white panel, so switch to a deeper pink/blue duotone.
+     No text-stroke: it distorted the glyphs at small sizes. */
   :root:not([data-theme="dark"]) .dev-name {
-    -webkit-text-stroke: .4px rgba(14, 23, 30, .45);
+    background-image: linear-gradient(90deg, #b04a66 0%, #1f6f96 100%);
   }
   @media (max-width: 760px) {
     .credits-inner { grid-template-columns: 1fr; gap: 22px; }
@@ -900,7 +902,7 @@
 </main>
 
 <!-- Footer credits: brand area intentionally empty for now; Project / Updates / Contact columns. -->
-<footer class="credits" role="contentinfo">
+<footer class="credits" id="credits" role="contentinfo">
   <div class="credits-inner">
     <div class="credits-brand" aria-label="PsychoInverse 品牌区（待补充）">
       <span class="credits-logo" aria-hidden="true"></span>
