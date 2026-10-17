@@ -93,25 +93,28 @@ export function answerSheet(plan, options = {}) {
   };
 }
 
-/** SCL-90 因子剖面表：均分 + 临床解释（无 T 分概念）。 */
-export function scl90ProfileSheet(plan) {
+/** 通用 likert 量表因子剖面表：均分/总分 + 临床解释（无 T 分概念）。 */
+export function likertProfileSheet(plan, data) {
   const factors = (plan.profile && plan.profile.factors) || {};
   const diagnoses = (plan.profile && plan.profile.diagnoses) || {};
-  const rows = [['因子', '均分', '解释']];
-  for (const name of Object.keys(factors)) {
-    const f = factors[name];
-    const sev = diagnoses[name] ? diagnoses[name].severity : '';
-    rows.push([name, f.mean.toFixed(2), sev]);
+  const rows = [['因子', '均分/总分', '解释']];
+  for (const f of data.scales) {
+    const metric = f.bandMetric || 'mean';
+    const val =
+      f.bind[0] === 0 && f.type === 'sum'
+        ? plan.profile.total
+        : f.bind[0] === 0
+          ? plan.profile.totalMean.toFixed(2)
+          : (metric === 'sum' ? factors[f.name].raw : factors[f.name].mean).toFixed(2);
+    const sev = diagnoses[f.name] ? diagnoses[f.name].severity : '';
+    rows.push([f.name, val, sev]);
   }
-  if (plan.profile && typeof plan.profile.total === 'number') {
-    rows.push(['总分', plan.profile.totalMean.toFixed(2), diagnoses['总分'] ? diagnoses['总分'].severity : '']);
-  }
-  return { name: '因子剖面', rows, widths: [12, 10, 22] };
+  return { name: '因子剖面', rows, widths: [12, 12, 22] };
 }
 
-/** SCL-90 目标达成表：各因子目标均分 vs 达成均分 + 偏差。 */
-export function scl90TargetSheet(plan) {
-  const rows = [['因子', '目标均分', '达成均分', '偏差']];
+/** 通用 likert 量表目标达成表：各因子目标 vs 达成 + 偏差。 */
+export function likertTargetSheet(plan, data) {
+  const rows = [['因子', '目标', '达成', '偏差']];
   for (const name of Object.keys(plan.target || {})) {
     const want = Number(plan.target[name]);
     const got = Number(plan.achieved[name]);
@@ -194,14 +197,14 @@ export function buildSheets(plan, options = {}) {
   for (const id of content) {
     if (id === 'answers' && plan) out.push(answerSheet(plan, { withEnglish, withLockInfo, data }));
     if (id === 'profile' && plan) {
-      out.push(plan.scale === 'scl90'
-        ? scl90ProfileSheet(plan)
-        : profileSheet(plan, { isMale, data }));
+      out.push(data.id === 'mmpi2'
+        ? profileSheet(plan, { isMale, data })
+        : likertProfileSheet(plan, data));
     }
     if (id === 'targets' && plan) {
-      out.push(plan.scale === 'scl90'
-        ? scl90TargetSheet(plan)
-        : targetSheet(plan, { isMale, data }));
+      out.push(data.id === 'mmpi2'
+        ? targetSheet(plan, { isMale, data })
+        : likertTargetSheet(plan, data));
     }
     if (id === 'template') out.push(blankTemplate({ withEnglish, data }));
   }

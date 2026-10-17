@@ -4,6 +4,9 @@ export const SCL90_DATA = {
   "id": "scl90",
   "name": "SCL-90心理自测表",
   "nItems": 90,
+  "scoreShift": 1,
+  "positiveScore": 2,
+  "positiveCutoff": 43,
   "items": {
     "zh": [
       "头痛",

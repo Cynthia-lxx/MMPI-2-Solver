@@ -15,7 +15,13 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const root = dirname(fileURLToPath(import.meta.url));
-const SOURCES = ['data.js', 'formats.js', 'scl90.data.js', 'scl90.js', 'inverse.js', 'xlsx.js', 'sheet.js', 'gui.js'];
+const SOURCES = [
+  'data.js', 'formats.js',
+  'likert.js',
+  'scl90.data.js', 'scl90.js',
+  'phq9.data.js', 'gad7.data.js', 'hads.data.js', 'who5.data.js',
+  'inverse.js', 'xlsx.js', 'sheet.js', 'gui.js',
+];
 const SRC = 'index.src.html';
 
 /** Drop ES module syntax so the bundle runs as one classic <script>. */

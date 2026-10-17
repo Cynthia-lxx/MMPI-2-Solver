@@ -56,6 +56,8 @@ const data = {
   id: 'scl90',
   name: o.name,
   nItems: 90,
+  scoreShift: 1, // 内部级别 0..4 -> 得分 1..5
+  positiveScore: 2, // 得分 >=2 计为阳性项目
   items: {
     zh: zh.map((s) => s.trim()),
     en: zh.map(() => ''),
