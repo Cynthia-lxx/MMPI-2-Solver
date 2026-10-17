@@ -201,10 +201,11 @@ export function likertFeasibleBounds(data, targets = {}) {
     const loC = Math.max(scoreMin, sum - scoreMax * (ni - 1));
     const hiC = Math.min(scoreMax, sum - scoreMin * (ni - 1));
     for (const it of f.bind) {
-      bounds[it] = {
-        lo: levelFromContrib(data, it, loC),
-        hi: levelFromContrib(data, it, hiC),
-      };
+      // 反向题的 levelFromContrib 单调递减：loC 映射出的是较大的级别，hiC 映射出的是较小的
+      // 级别，直接赋值会得到 lo > hi，GUI 会退化成「只锁定一格」。这里统一成 lo <= hi。
+      const a = levelFromContrib(data, it, loC);
+      const b = levelFromContrib(data, it, hiC);
+      bounds[it] = { lo: Math.min(a, b), hi: Math.max(a, b) };
     }
   }
   return bounds;

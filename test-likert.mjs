@@ -54,6 +54,27 @@ for (const [name, data] of [['PHQ-9', PHQ9_DATA], ['GAD-7', GAD7_DATA], ['HADS',
   ok(likertScore(PHQ9_DATA, next).total === 20, '改一题后 PHQ-9 总分守恒', `${likertScore(PHQ9_DATA, next).total}`);
 }
 
+// 反向题的可行区间不得出现 lo > hi（否则 GUI 白框会画到反方向、答案落在框外）
+{
+  for (const [name, data, targets] of [
+    ['HADS', HADS_DATA, { 焦虑: 20, 抑郁: 4 }],
+    ['HADS', HADS_DATA, { 焦虑: 13, 抑郁: 13 }],
+    ['HADS', HADS_DATA, { 焦虑: 21, 抑郁: 0 }],
+  ]) {
+    const r = likertSolve(data, targets);
+    const b = likertFeasibleBounds(data, targets);
+    let bad = 0;
+    let out = 0;
+    for (let i = 1; i <= data.nItems; i += 1) {
+      if (b[i].lo > b[i].hi) bad += 1;
+      const a = r.answers[i - 1];
+      if (a < b[i].lo || a > b[i].hi) out += 1;
+    }
+    ok(bad === 0, `${name} 反向题区间 lo<=hi`, `bad=${bad}`);
+    ok(out === 0, `${name} 自动答案落在可行区间内`, `out=${out}`);
+  }
+}
+
 // 解析 / 导出
 {
   const csv = likertExportCsv(PHQ9_DATA, new Array(9).fill(2));
