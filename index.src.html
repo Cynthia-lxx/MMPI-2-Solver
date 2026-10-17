@@ -121,6 +121,14 @@
     .dropdown-option.picked { animation: ddPick var(--anim-med) ease; }
     @keyframes ddPulse { 0% { transform: scale(1); } 50% { transform: scale(.97); } 100% { transform: scale(1); } }
     @keyframes ddPick { 0% { background: var(--accent-soft); } 100% { background: transparent; } }
+
+    /* 移动端叠加面板：遮罩淡入 + 面板滑入；关闭按钮反馈 */
+    .dd-sheet-scrim { transition: opacity var(--anim-fast) ease; }
+    .dd-sheet { transition: transform var(--anim-med) var(--ease-out); }
+    .dd-sheet-close { transition: background-color var(--anim-xfast) ease, color var(--anim-xfast) ease; }
+    /* 版块展开 / 收起 + 摘要箭头旋转 */
+    .details-body { transition: grid-template-rows var(--anim-med) var(--ease-out); }
+    summary::after { transition: transform var(--anim-fast) ease; }
   }
   * { box-sizing: border-box; }
   body {
@@ -278,6 +286,56 @@
   .row .dropdown-trigger { padding: 2px 4px; border-radius: 5px; font-size: 13px; }
   .typ-quick .dropdown { flex: 1; min-width: 0; display: block; }
   .typ-quick .dropdown-trigger { padding: 5px 8px; }
+
+  /* ===== 移动端 / 低分辨率：下拉改为底部叠加面板（bottom sheet），避免控件过小 ===== */
+  .dd-sheet-scrim {
+    position: fixed; inset: 0; z-index: 200; display: flex; align-items: flex-end; justify-content: center;
+    background: rgba(10, 16, 28, .42); opacity: 0; pointer-events: none;
+  }
+  .dd-sheet-scrim[hidden] { display: none; }
+  .dd-sheet-scrim.open { opacity: 1; pointer-events: auto; }
+  .dd-sheet {
+    width: 100%; max-width: 560px; max-height: 72vh; display: flex; flex-direction: column;
+    background: var(--panel); border-radius: 16px 16px 0 0; box-shadow: 0 -10px 34px rgba(8, 12, 22, .28);
+    transform: translateY(100%);
+  }
+  .dd-sheet-scrim.open .dd-sheet { transform: translateY(0); }
+  .dd-sheet-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 14px 16px 10px; border-bottom: 1px solid var(--line);
+  }
+  .dd-sheet-title { font-weight: 650; font-size: 15px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dd-sheet-close {
+    flex: 0 0 auto; border: 0; background: var(--code-bg); color: var(--muted);
+    width: 30px; height: 30px; border-radius: 50%; font-size: 14px; line-height: 1; cursor: pointer;
+  }
+  .dd-sheet-close:hover { color: var(--ink); }
+  .dd-sheet-list {
+    list-style: none; margin: 0; padding: 6px 10px 16px; overflow-y: auto; flex: 1 1 auto; min-height: 0;
+    -webkit-overflow-scrolling: touch;
+  }
+  .dd-sheet-list .dropdown-option { padding: 12px 12px; font-size: 15px; }
+  .dd-sheet-list .dropdown-option.selected { background: var(--accent-soft); }
+  /* 仅移动端使用叠加面板；桌面端隐藏以防误触 */
+  @media (min-width: 641px) and (pointer: fine) { .dd-sheet-scrim { display: none !important; } }
+  body.dd-sheet-open { overflow: hidden; }
+
+  /* ===== 版块展开 / 收起动画（替代原生瞬切）：grid 行高 0fr→1fr 平滑过渡 ===== */
+  details > .details-body { display: grid; grid-template-rows: 0fr; }
+  details[open] > .details-body { grid-template-rows: 1fr; }
+  .details-inner { min-height: 0; }
+  /* 仅在收起态或动画期间裁剪；完全展开后恢复可见，避免误伤内部下拉面板 */
+  details:not([open]) > .details-body > .details-inner,
+  details.animating > .details-body > .details-inner { overflow: hidden; }
+  summary { list-style: none; cursor: pointer; }
+  summary::-webkit-details-marker { display: none; }
+  .group > summary, .bulk > summary, .io > summary, details > summary { position: relative; padding-right: 20px; }
+  summary::after {
+    content: ''; position: absolute; right: 6px; top: 50%; width: 7px; height: 7px; margin-top: -5px;
+    border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted);
+    transform: rotate(45deg); transform-origin: center;
+  }
+  details[open] > summary::after { transform: rotate(-135deg); margin-top: -2px; }
 
   /* 触屏长按弹出的提示气泡（替代悬停 title） */
   .tip {

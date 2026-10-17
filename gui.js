@@ -904,6 +904,7 @@ function buildScaleList() {
     select.addEventListener('change', onTargetChanged);
   }
   hydrateDropdowns(dom.scaleList);
+  setupAnimatedDetails(dom.scaleList);
   applySearch();
 }
 
@@ -2277,6 +2278,7 @@ function buildLikertScaleList() {
     select.addEventListener('change', onTargetChanged);
   }
   hydrateDropdowns(dom.scaleList);
+  setupAnimatedDetails(dom.scaleList);
   applySearch();
 }
 
@@ -2431,6 +2433,77 @@ function getCurrentOptionText(select) {
 let _closeAllDropdowns = null;
 const _raf = (cb) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(cb) : setTimeout(cb, 0));
 
+let _sheet = null;
+let _sheetCloseTimer = null;
+const isCompact = () =>
+  (typeof window !== 'undefined' && typeof window.matchMedia === 'function') &&
+  window.matchMedia('(max-width: 640px), (pointer: coarse)').matches;
+
+function ensureSheet() {
+  if (_sheet) return _sheet;
+  const scrim = document.createElement('div');
+  scrim.className = 'dd-sheet-scrim';
+  scrim.hidden = true;
+  const sheet = document.createElement('div');
+  sheet.className = 'dd-sheet';
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-modal', 'true');
+  const head = document.createElement('div');
+  head.className = 'dd-sheet-head';
+  const title = document.createElement('div');
+  title.className = 'dd-sheet-title';
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'dd-sheet-close';
+  closeBtn.setAttribute('aria-label', '关闭');
+  closeBtn.textContent = '✕';
+  head.append(title, closeBtn);
+  const listEl = document.createElement('ul');
+  listEl.className = 'dd-sheet-list';
+  listEl.setAttribute('role', 'listbox');
+  listEl.tabIndex = -1;
+  sheet.append(head, listEl);
+  scrim.append(sheet);
+  document.body.append(scrim);
+  scrim.addEventListener('click', (e) => { if (e.target === scrim) closeSheet(); });
+  closeBtn.addEventListener('click', () => closeSheet());
+  _sheet = { scrim, sheet, head, title, listEl, closeBtn };
+  return _sheet;
+}
+
+function closeSheet() {
+  if (!_sheet || !_sheet.scrim.classList.contains('open')) return;
+  _sheet.scrim.classList.remove('open');
+  document.body.classList.remove('dd-sheet-open');
+  clearTimeout(_sheetCloseTimer);
+  _sheetCloseTimer = setTimeout(() => {
+    if (!_sheet.scrim.classList.contains('open')) _sheet.scrim.hidden = true;
+  }, 320);
+  if (_sheet.scrim._owner && typeof _sheet.scrim._owner.setClosed === 'function') _sheet.scrim._owner.setClosed();
+}
+
+function setupAnimatedDetails(root = document) {
+  (root || document).querySelectorAll('details').forEach((d) => {
+    if (d._animated) return;
+    d._animated = true;
+    const summary = d.querySelector(':scope > summary');
+    if (!summary) return;
+    const body = document.createElement('div');
+    body.className = 'details-body';
+    const inner = document.createElement('div');
+    inner.className = 'details-inner';
+    [...d.children].forEach((ch) => { if (ch !== summary) inner.appendChild(ch); });
+    body.appendChild(inner);
+    d.appendChild(body);
+    // 仅在动画期间裁剪，展开完成后恢复可见，避免误伤内部下拉面板
+    d.addEventListener('toggle', () => {
+      d.classList.add('animating');
+      clearTimeout(d._t);
+      d._t = setTimeout(() => d.classList.remove('animating'), 360);
+    });
+  });
+}
+
 function hydrateDropdown(select) {
   if (!select || select._dropdown || !select.options) return;
   select._dropdown = true;
@@ -2467,14 +2540,13 @@ function hydrateDropdown(select) {
   sync();
   select._syncDropdown = sync;
 
-  const close = () => {
+  const closeInline = () => {
     if (!wrap.classList.contains('open')) return;
     wrap.classList.remove('open');
     trigger.setAttribute('aria-expanded', 'false');
     setTimeout(() => { if (!wrap.classList.contains('open')) panel.hidden = true; }, 320);
   };
-  const setActive = (idx) => {
-    const items = [...list.children];
+  const setActive = (items, idx) => {
     if (!items.length) return;
     activeIdx = (idx + items.length) % items.length;
     items.forEach((it, i) => it.classList.toggle('active', i === activeIdx));
@@ -2484,23 +2556,21 @@ function hydrateDropdown(select) {
   const selectOption = (li) => {
     const o = [...select.options].find((opt) => opt.value === li.dataset.value);
     if (!o) return;
-    if (o.value === select.value) { close(); return; }
+    if (o.value === select.value) { closeCurrent(); return; }
     select.value = o.value;
     sync();
-    list.querySelectorAll('.dropdown-option.selected').forEach((x) => x.classList.remove('selected'));
+    const parent = li.parentElement;
+    if (parent) parent.querySelectorAll('.dropdown-option.selected').forEach((x) => x.classList.remove('selected'));
     li.classList.add('selected');
     li.classList.remove('picked'); void li.offsetWidth; li.classList.add('picked');
     trigger.classList.remove('pulse'); void trigger.offsetWidth; trigger.classList.add('pulse');
     select.dispatchEvent(new Event('change', { bubbles: true }));
-    close();
+    closeCurrent();
   };
-  let built = false;
   let activeIdx = -1;
-  const buildPanel = () => {
-    // 选项数量变化（如导出格式重建）时重建，否则只建一次
-    if (built && list.children.length === select.options.length) return;
-    list.innerHTML = '';
-    built = true;
+  let surface = null; // 'inline' | 'sheet'
+  const buildOptions = (targetUl) => {
+    targetUl.innerHTML = '';
     [...select.options].forEach((o, i) => {
       const li = document.createElement('li');
       li.className = 'dropdown-option';
@@ -2509,47 +2579,72 @@ function hydrateDropdown(select) {
       li.textContent = o.textContent;
       if (o.value === select.value) { li.classList.add('selected'); activeIdx = i; }
       li.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); selectOption(li); });
-      list.appendChild(li);
+      targetUl.appendChild(li);
     });
   };
-  const open = () => {
-    if (wrap.classList.contains('open')) return;
-    buildPanel();
-    panel.hidden = false;
-    list.querySelectorAll('.dropdown-option').forEach((li) => {
+  const openInline = () => {
+    surface = 'inline';
+    if (list.children.length !== select.options.length) buildOptions(list);
+    else list.querySelectorAll('.dropdown-option').forEach((li) => {
       const on = li.dataset.value === select.value;
       li.classList.toggle('selected', on);
       if (on) activeIdx = [...list.children].indexOf(li);
     });
+    panel.hidden = false;
     _raf(() => wrap.classList.add('open'));
     trigger.setAttribute('aria-expanded', 'true');
-    setActive(activeIdx < 0 ? 0 : activeIdx);
+    setActive([...list.children], activeIdx < 0 ? 0 : activeIdx);
     trigger.focus();
+  };
+  const closeBtnFocus = () => { if (_sheet) _sheet.closeBtn.focus(); };
+  const openSheet = () => {
+    surface = 'sheet';
+    const s = ensureSheet();
+    s.title.textContent = label.textContent || select.getAttribute('aria-label') || '请选择';
+    buildOptions(s.listEl);
+    const sel = s.listEl.querySelector('.dropdown-option.selected');
+    if (sel && typeof sel.scrollIntoView === 'function') sel.scrollIntoView({ block: 'center' });
+    s.scrim.hidden = false;
+    document.body.classList.add('dd-sheet-open');
+    _raf(() => s.scrim.classList.add('open'));
+    trigger.setAttribute('aria-expanded', 'true');
+    s.scrim._owner = { setClosed: () => { trigger.setAttribute('aria-expanded', 'false'); surface = null; } };
+    s.listEl.focus();
+    s.listEl.onkeydown = (e) => {
+      const items = [...s.listEl.children];
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(items, activeIdx + 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(items, activeIdx - 1); }
+      else if (e.key === 'Home') { e.preventDefault(); setActive(items, 0); }
+      else if (e.key === 'End') { e.preventDefault(); setActive(items, items.length - 1); }
+      else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (items[activeIdx]) selectOption(items[activeIdx]); }
+      else if (e.key === 'Escape') { e.preventDefault(); closeSheet(); closeBtnFocus(); }
+    };
+  };
+  const closeCurrent = () => {
+    if (surface === 'sheet') closeSheet();
+    else closeInline();
+    trigger.setAttribute('aria-expanded', 'false');
+    surface = null;
   };
 
   trigger.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (wrap.classList.contains('open')) { close(); return; }
-    if (_closeAllDropdowns) _closeAllDropdowns(); // 先收起其它已展开的下拉
-    open();
+    if (surface) { closeCurrent(); return; }
+    if (_closeAllDropdowns) _closeAllDropdowns(); // 先收起其它已展开的下拉 / 叠加面板
+    if (isCompact()) openSheet(); else openInline();
   });
   trigger.addEventListener('keydown', (e) => {
-    if (!wrap.classList.contains('open')) {
-      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
-      return;
+    if (surface) return; // 展开后由对应 surface 自行处理键盘
+    if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (isCompact()) openSheet(); else openInline();
     }
-    if (e.key === 'ArrowDown') { e.preventDefault(); setActive(activeIdx + 1); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(activeIdx - 1); }
-    else if (e.key === 'Home') { e.preventDefault(); setActive(0); }
-    else if (e.key === 'End') { e.preventDefault(); setActive(list.children.length - 1); }
-    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (list.children[activeIdx]) selectOption(list.children[activeIdx]); }
-    else if (e.key === 'Escape') { e.preventDefault(); close(); trigger.focus(); }
   });
   // 用户经其它途径改 select.value 时（如测试 / 代码）保持标签同步
   select.addEventListener('change', sync);
 
-  select._closeDropdown = close;
+  select._closeDropdown = closeCurrent;
   if (!_closeAllDropdowns) {
     _closeAllDropdowns = () => {
       document.querySelectorAll('.dropdown.open').forEach((d) => {
@@ -2557,8 +2652,9 @@ function hydrateDropdown(select) {
         const t = d.querySelector('.dropdown-trigger'); if (t) t.setAttribute('aria-expanded', 'false');
         const p = d.querySelector('.dropdown-panel'); if (p) setTimeout(() => { if (!d.classList.contains('open')) p.hidden = true; }, 320);
       });
+      closeSheet(); // 同时收起移动端叠加面板
     };
-    document.addEventListener('click', (e) => { if (!e.target.closest('.dropdown')) _closeAllDropdowns(); });
+    document.addEventListener('click', (e) => { if (!e.target.closest('.dropdown') && !e.target.closest('.dd-sheet-scrim')) _closeAllDropdowns(); });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') _closeAllDropdowns(); });
   }
 }
@@ -2682,6 +2778,7 @@ export function init() {
   refreshSolveButton();
   setupLongPressTips();
   hydrateDropdowns(document); // 把工具栏 / 量表切换等原生 select 升级为自研下拉
+  setupAnimatedDetails(document);
 }
 
 function camel(id) {
@@ -2751,6 +2848,7 @@ function buildTypologyTarget() {
     s.addEventListener('change', onTypDimChanged);
   }
   hydrateDropdowns(dom.scaleList);
+  setupAnimatedDetails(dom.scaleList);
   applySearch();
 }
 
