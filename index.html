@@ -576,6 +576,15 @@
   .bank-wrap td.st.free { color: var(--free); }
   .bank-wrap td.st.locked { color: var(--bad); }
   .bank-wrap tr.locked td.orig { opacity: .78; }
+  /* MBTI 题库：题干 + A/B 两个选项文本，选中项高亮 */
+  body[data-scale^="mbti"] .bank-wrap td.zh { width: auto; }
+  .bank-wrap td.zh .bank-stem { margin-bottom: 3px; }
+  .bank-wrap td.zh .bank-opt { display: block; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+  .bank-wrap td.zh .bank-opt.on { color: var(--fg); font-weight: 600; }
+  .bank-wrap td.zh .bank-opt em {
+    font-style: normal; font-weight: 700; font-size: 9px; color: #fff;
+    border-radius: 3px; padding: 0 4px; margin-right: 4px;
+  }
   .cell .q .en { display: block; color: var(--muted); font-size: 10.5px; }
   /* 切换到 SCL-90 时隐藏 MMPI-2 专属控件 */
   body:not([data-scale="mmpi2"]) .mmpi2-only { display: none !important; }
@@ -589,9 +598,22 @@
   #profile td.hot, #target-table td.hot { color: var(--bad); font-weight: 600; }
   .cell.multi .lvl { min-width: 26px; }
 
-  /* MBTI typology：A/B 作答单元格 + 维度色（inline 已给字母着色，此处补基础与图表） */
-  .cell.typ { font-weight: 600; cursor: pointer; }
-  .cell.typ .n { font-weight: 400; }
+  /* MBTI typology：二选一作答格，直接展示 A/B 两个选项文本，点击选择 */
+  .cell.typ {
+    flex-direction: column; align-items: stretch; justify-content: flex-start;
+    gap: 3px; padding: 5px 7px; font-weight: 400; cursor: pointer;
+  }
+  .cell.typ > .n { font-size: 10px; opacity: .75; }
+  .cell.typ .opt {
+    display: flex; align-items: flex-start; gap: 5px;
+    padding: 2px 4px; border: 1px solid transparent; border-radius: 4px;
+    font-size: 11px; line-height: 1.4; color: var(--muted); word-break: break-word;
+  }
+  .cell.typ .opt em {
+    flex: none; font-style: normal; font-weight: 700; font-size: 9px; line-height: 1.5;
+    color: #fff; border-radius: 3px; padding: 0 4px;
+  }
+  .cell.typ .opt.on { color: var(--fg); font-weight: 600; border-color: var(--accent); background: var(--targeted-bg); }
   .cell.typ:hover { border-color: var(--accent); }
   .typ-targets .row.typ-row { grid-template-columns: 52px 1fr 1fr; align-items: center; }
   .typ-quick { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
@@ -5737,17 +5759,42 @@ function renderItemBank() {
   const rows = [];
   let shown = 0;
   for (let item = 1; item <= total; item += 1) {
-    const text = isTypology()
+    const typ = isTypology();
+    const text = typ
       ? {
           zh: (currentData().items.zh && currentData().items.zh[item - 1]) || '',
           en: (currentData().items.en && currentData().items.en[item - 1]) || '',
           topic: null,
         }
       : itemText(item, currentData());
+    const optA = typ ? ((currentData().items.zhA && currentData().items.zhA[item - 1]) || '') : '';
+    const optB = typ ? ((currentData().items.zhB && currentData().items.zhB[item - 1]) || '') : '';
     if (needle &&
         String(item) !== needle &&
         !(text.en || '').toLowerCase().includes(needle) &&
-        !text.zh.toLowerCase().includes(needle)) continue;
+        !text.zh.toLowerCase().includes(needle) &&
+        !(typ && (optA.toLowerCase().includes(needle) || optB.toLowerCase().includes(needle)))) continue;
+    // MBTI：题干 + A/B 两个真实选项文本；选中项高亮。不再用维度字母当作选项/回答。
+    if (typ) {
+      const ans = state.answers ? state.answers[item - 1] : null;
+      const [la, lb] = currentData().itemOptions[item - 1] || ['', ''];
+      shown += 1;
+      rows.push(
+        `<tr data-item="${item}">` +
+        `<td class="n">${item}</td>` +
+        `<td class="zh">` +
+          `<div class="bank-stem">${escapeHtml(text.zh)}</div>` +
+          `<div class="bank-opt${ans === 0 ? ' on' : ''}">` +
+            `<em style="background:var(--mbti-${String(la || 'e').toLowerCase()})">A</em>${escapeHtml(optA)}</div>` +
+          `<div class="bank-opt${ans === 1 ? ' on' : ''}">` +
+            `<em style="background:var(--mbti-${String(lb || 'e').toLowerCase()})">B</em>${escapeHtml(optB)}</div>` +
+        `</td>` +
+        `<td class="ans ${ans === null ? 'dim' : 'is-t'}">${ans === null ? '—' : ans ? 'B' : 'A'}</td>` +
+        `<td class="st dim">—</td>` +
+        `</tr>`
+      );
+      continue;
+    }
     const answer = state.answers
       ? (isTypology()
           ? (state.answers[item - 1] ? currentData().itemOptions[item - 1][1] : currentData().itemOptions[item - 1][0])
@@ -5782,9 +5829,10 @@ function renderItemBank() {
       '</tr>'
     );
   }
-  dom.bankTable.innerHTML =
-    '<thead><tr><th>题号</th><th>英文原文</th><th>中文</th><th>回答</th><th>状态</th></tr></thead>' +
-    `<tbody>${rows.join('')}</tbody>`;
+  const head = isTypology()
+    ? '<thead><tr><th>题号</th><th>题目与选项</th><th>回答</th><th>状态</th></tr></thead>'
+    : '<thead><tr><th>题号</th><th>英文原文</th><th>中文</th><th>回答</th><th>状态</th></tr></thead>';
+  dom.bankTable.innerHTML = head + `<tbody>${rows.join('')}</tbody>`;
   if (dom.bankCount) {
     dom.bankCount.textContent = `显示 ${shown} / ${total} 题` +
       (plan ? '' : '（生成答卷后可看回答与锁定状态）');
@@ -5825,7 +5873,10 @@ function onAnswerClick(event) {
   }
   if (isTypology()) {
     const item = Number(cell.dataset.item);
-    state.answers[item - 1] = state.answers[item - 1] ? 0 : 1;
+    const optEl = event.target.closest('[data-opt]');
+    const next = optEl ? Number(optEl.dataset.opt) : (state.answers[item - 1] ? 0 : 1);
+    if (optEl && state.answers[item - 1] === next) return;
+    state.answers[item - 1] = next;
     const data = currentData();
     const scores = data.samples ? mbtiScoreKnn(data, state.answers) : mbtiScore(data, state.answers);
     state.plan.scores = scores;
@@ -7168,20 +7219,25 @@ function renderTypologyAnswers(plan) {
   const data = currentData();
   const parts = [];
   const showText = dom.showText ? dom.showText.checked : false;
+  const zhA = data.items.zhA || [];
+  const zhB = data.items.zhB || [];
   for (let item = 1; item <= data.nItems; item += 1) {
     const ans = state.answers[item - 1] ? 1 : 0; // 0=A, 1=B
-    const [letterA, letterB] = data.itemOptions[item - 1];
-    const letter = ans === 0 ? letterA : letterB;
+    const [letterA, letterB] = data.itemOptions[item - 1] || ['', ''];
     const stem = data.items.zh ? data.items.zh[item - 1] : '';
-    const aText = data.items.zhA ? data.items.zhA[item - 1] : '';
-    const bText = data.items.zhB ? data.items.zhB[item - 1] : '';
-    const q = ans === 0 ? aText : bText;
+    const aText = zhA[item - 1] || '';
+    const bText = zhB[item - 1] || '';
     const title = [stem, `A：${aText}`, `B：${bText}`].filter(Boolean).join('\n');
+    // 二选一：直接展示两个选项各自文本，点击选中；维度色只作标识，不再把维度字母当选项
     parts.push(
-      `<div class="cell typ ${ans === 0 ? 'is-a' : 'is-b'} dim-${letter.toLowerCase()}"` +
+      `<div class="cell typ ${ans === 0 ? 'is-a' : 'is-b'}"` +
       ` data-item="${item}" title="${escapeAttr(title)}">` +
-      `<span class="n">${item}</span><b style="color:var(--mbti-${letter.toLowerCase()})">${letter}</b>` +
-      (showText ? `<span class="q">${escapeHtml(q)}</span>` : '') +
+      `<span class="n">${item}</span>` +
+      `<span class="opt${ans === 0 ? ' on' : ''}" data-opt="0">` +
+        `<em style="background:var(--mbti-${String(letterA || 'e').toLowerCase()})">A</em>${escapeHtml(aText)}</span>` +
+      `<span class="opt${ans === 1 ? ' on' : ''}" data-opt="1">` +
+        `<em style="background:var(--mbti-${String(letterB || 'e').toLowerCase()})">B</em>${escapeHtml(bText)}</span>` +
+      (showText ? `<span class="q">${escapeHtml(stem)}</span>` : '') +
       '</div>'
     );
   }
@@ -7192,7 +7248,7 @@ function renderTypologyAnswers(plan) {
     c.classList.add('cell-in');
     c.style.animationDelay = `${Math.min(i, 30) * 10}ms`;
   });
-  dom.freeCount.textContent = `${data.nItems} 题（点击切换 A/B）`;
+  dom.freeCount.textContent = `${data.nItems} 题（点击选项切换）`;
 }
 
 if (typeof document !== 'undefined') {

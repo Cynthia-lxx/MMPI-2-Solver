@@ -89,6 +89,13 @@ cell.dispatchEvent(new win.Event('click', { bubbles: true }));
 const after = countCells(document.getElementById('answers').innerHTML);
 check(after === before && after > 0, '翻转一格后仍正常渲染', `cells=${after}`);
 
+/* 2b. 选项必须是每题的两个真实文本，而不是维度字母 E/I/N/S/F/T/P/J */
+const ansHtml = document.getElementById('answers').innerHTML;
+check(!/<b[^>]*>[EISNTFJP]<\/b>/.test(ansHtml), '作答格不再把维度字母当选项');
+check(/data-opt="0"/.test(ansHtml) && /data-opt="1"/.test(ansHtml), '作答格提供 A/B 两个选项');
+const zhA0 = MBTI93_DATA.items.zhA[0];
+check(ansHtml.includes(zhA0), '作答格显示真实选项文本', zhA0);
+
 /* 3. 导入 round-trip：mbti93 的 INTJ 作答串 → 评分仍为 INTJ */
 setScale('mbti93');
 const { mbtiSolve } = await import('./mbti.js');
