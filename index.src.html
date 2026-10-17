@@ -109,6 +109,18 @@
     /* 区块切换时的轻微滑入；状态达成时的脉冲提示 */
     .content-in { animation: contentIn var(--anim-in) var(--ease-out) both; }
     .status.ok { animation: notePulse var(--anim-slow) ease both; }
+
+    /* 自研下拉：展开 / 收起 / 选择 的过渡与关键帧 */
+    .dropdown-panel {
+      transition: grid-template-rows var(--anim-med) var(--ease-out),
+                  opacity var(--anim-fast) ease, transform var(--anim-fast) ease;
+    }
+    .dropdown-caret, .dropdown-trigger { transition: transform var(--anim-fast) ease, border-color var(--anim-xfast) ease, background-color var(--anim-xfast) ease; }
+    .dropdown-option { transition: background-color var(--anim-xfast) ease, color var(--anim-xfast) ease; }
+    .dropdown-trigger.pulse { animation: ddPulse var(--anim-fast) ease; }
+    .dropdown-option.picked { animation: ddPick var(--anim-med) ease; }
+    @keyframes ddPulse { 0% { transform: scale(1); } 50% { transform: scale(.97); } 100% { transform: scale(1); } }
+    @keyframes ddPick { 0% { background: var(--accent-soft); } 100% { background: transparent; } }
   }
   * { box-sizing: border-box; }
   body {
@@ -221,6 +233,52 @@
   .row select { font: inherit; border: 1px solid var(--line); border-radius: 5px; padding: 2px 4px; background: var(--input-bg); }
   .row .full { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cn { color: var(--muted); font-weight: 400; font-size: 11px; margin-left: 4px; }
+
+  /* ===== 自研下拉菜单：原生 <select> 保留（可访问性 + 测试契约），其上层叠加带
+     动效的触发器 / 弹出层；展开 / 收起 / 选择均有过渡（动效参数见下方媒体查询） ===== */
+  .dropdown { position: relative; display: inline-block; }
+  .select-native {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  }
+  .dropdown-trigger {
+    display: inline-flex; align-items: center; justify-content: space-between; gap: 6px;
+    width: 100%; font: inherit; color: var(--ink); text-align: left;
+    background: var(--input-bg); border: 1px solid var(--line); border-radius: 6px;
+    padding: 5px 8px; cursor: pointer;
+  }
+  .dropdown-trigger:hover { border-color: var(--accent); }
+  .dropdown-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .dropdown-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dropdown-caret { flex: 0 0 auto; color: var(--muted); font-size: 10px; line-height: 1; }
+  .dropdown-panel {
+    position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; margin: 0;
+    padding: 4px; list-style: none; min-width: 100%;
+    display: grid; grid-template-rows: 0fr; opacity: 0; transform: translateY(-4px);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    box-shadow: 0 10px 28px rgba(18, 28, 48, .14); pointer-events: none;
+  }
+  .dropdown.open .dropdown-panel {
+    grid-template-rows: 1fr; opacity: 1; transform: translateY(0); pointer-events: auto;
+  }
+  .dropdown-panel[hidden] { display: none; }
+  .dropdown-list {
+    overflow: hidden; min-height: 0; margin: 0; padding: 0; list-style: none;
+    max-height: 280px; overflow-y: auto;
+  }
+  .dropdown-option {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  .dropdown-option.active, .dropdown-option:hover { background: var(--accent-soft); color: var(--accent); }
+  .dropdown-option.selected { color: var(--accent); font-weight: 600; }
+  .dropdown-option.selected::after { content: '✓'; color: var(--accent); font-weight: 700; }
+  /* 行内 T 分下拉 / MBTI 快捷类型下拉铺满父容器 */
+  .row .dropdown { display: block; width: 100%; }
+  .row .dropdown-trigger { padding: 2px 4px; border-radius: 5px; font-size: 13px; }
+  .typ-quick .dropdown { flex: 1; min-width: 0; display: block; }
+  .typ-quick .dropdown-trigger { padding: 5px 8px; }
+
   /* 触屏长按弹出的提示气泡（替代悬停 title） */
   .tip {
     position: fixed; z-index: 9999; max-width: min(86vw, 360px);

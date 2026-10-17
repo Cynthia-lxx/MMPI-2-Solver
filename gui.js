@@ -903,6 +903,7 @@ function buildScaleList() {
   for (const select of dom.scaleList.querySelectorAll('select')) {
     select.addEventListener('change', onTargetChanged);
   }
+  hydrateDropdowns(dom.scaleList);
   applySearch();
 }
 
@@ -2275,6 +2276,7 @@ function buildLikertScaleList() {
     select.value = current ? String(current.lo) : '';
     select.addEventListener('change', onTargetChanged);
   }
+  hydrateDropdowns(dom.scaleList);
   applySearch();
 }
 
@@ -2415,6 +2417,159 @@ function popCell(cell) {
   cell.classList.add('cell-pop');
 }
 
+/* ============ 自研下拉菜单 ============
+ * 原生 <select> 保留在 DOM 中（可访问性 + 测试契约：querySelectorAll('select') /
+ * .options / .value / change 全部照常可用），其上叠加带「展开 / 收起 / 选择」
+ * 动效的自定义触发器与弹出层。选择时改写原生 select.value 并派发 change 事件，
+ * 既有监听逻辑（onTargetChanged 等）零改动；标签同步由原生 change 与显式
+ * syncAllDropdowns 双重保证。 */
+function getCurrentOptionText(select) {
+  const sel = [...select.options].find((o) => o.value === select.value);
+  return (sel || [...select.options].find((o) => o.selected) || select.options[0])?.textContent || '';
+}
+
+let _closeAllDropdowns = null;
+const _raf = (cb) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(cb) : setTimeout(cb, 0));
+
+function hydrateDropdown(select) {
+  if (!select || select._dropdown || !select.options) return;
+  select._dropdown = true;
+  select.classList.add('select-native');
+
+  const wrap = document.createElement('span');
+  wrap.className = 'dropdown';
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'dropdown-trigger';
+  trigger.setAttribute('aria-haspopup', 'listbox');
+  trigger.setAttribute('aria-expanded', 'false');
+  const label = document.createElement('span');
+  label.className = 'dropdown-label';
+  const caret = document.createElement('span');
+  caret.className = 'dropdown-caret';
+  caret.setAttribute('aria-hidden', 'true');
+  caret.textContent = '▾';
+  trigger.append(label, caret);
+
+  const panel = document.createElement('div');
+  panel.className = 'dropdown-panel';
+  panel.setAttribute('role', 'listbox');
+  panel.hidden = true;
+  const list = document.createElement('ul');
+  list.className = 'dropdown-list';
+  panel.appendChild(list);
+
+  // 把原生 select 移入 wrapper（仍能被 querySelectorAll('select') 命中）
+  select.parentNode.insertBefore(wrap, select);
+  wrap.append(select, trigger, panel);
+
+  const sync = () => { label.textContent = getCurrentOptionText(select); };
+  sync();
+  select._syncDropdown = sync;
+
+  const close = () => {
+    if (!wrap.classList.contains('open')) return;
+    wrap.classList.remove('open');
+    trigger.setAttribute('aria-expanded', 'false');
+    setTimeout(() => { if (!wrap.classList.contains('open')) panel.hidden = true; }, 320);
+  };
+  const setActive = (idx) => {
+    const items = [...list.children];
+    if (!items.length) return;
+    activeIdx = (idx + items.length) % items.length;
+    items.forEach((it, i) => it.classList.toggle('active', i === activeIdx));
+    const el = items[activeIdx];
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'nearest' });
+  };
+  const selectOption = (li) => {
+    const o = [...select.options].find((opt) => opt.value === li.dataset.value);
+    if (!o) return;
+    if (o.value === select.value) { close(); return; }
+    select.value = o.value;
+    sync();
+    list.querySelectorAll('.dropdown-option.selected').forEach((x) => x.classList.remove('selected'));
+    li.classList.add('selected');
+    li.classList.remove('picked'); void li.offsetWidth; li.classList.add('picked');
+    trigger.classList.remove('pulse'); void trigger.offsetWidth; trigger.classList.add('pulse');
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    close();
+  };
+  let built = false;
+  let activeIdx = -1;
+  const buildPanel = () => {
+    // 选项数量变化（如导出格式重建）时重建，否则只建一次
+    if (built && list.children.length === select.options.length) return;
+    list.innerHTML = '';
+    built = true;
+    [...select.options].forEach((o, i) => {
+      const li = document.createElement('li');
+      li.className = 'dropdown-option';
+      li.setAttribute('role', 'option');
+      li.dataset.value = o.value;
+      li.textContent = o.textContent;
+      if (o.value === select.value) { li.classList.add('selected'); activeIdx = i; }
+      li.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); selectOption(li); });
+      list.appendChild(li);
+    });
+  };
+  const open = () => {
+    if (wrap.classList.contains('open')) return;
+    buildPanel();
+    panel.hidden = false;
+    list.querySelectorAll('.dropdown-option').forEach((li) => {
+      const on = li.dataset.value === select.value;
+      li.classList.toggle('selected', on);
+      if (on) activeIdx = [...list.children].indexOf(li);
+    });
+    _raf(() => wrap.classList.add('open'));
+    trigger.setAttribute('aria-expanded', 'true');
+    setActive(activeIdx < 0 ? 0 : activeIdx);
+    trigger.focus();
+  };
+
+  trigger.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (wrap.classList.contains('open')) { close(); return; }
+    if (_closeAllDropdowns) _closeAllDropdowns(); // 先收起其它已展开的下拉
+    open();
+  });
+  trigger.addEventListener('keydown', (e) => {
+    if (!wrap.classList.contains('open')) {
+      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+      return;
+    }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive(activeIdx + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(activeIdx - 1); }
+    else if (e.key === 'Home') { e.preventDefault(); setActive(0); }
+    else if (e.key === 'End') { e.preventDefault(); setActive(list.children.length - 1); }
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (list.children[activeIdx]) selectOption(list.children[activeIdx]); }
+    else if (e.key === 'Escape') { e.preventDefault(); close(); trigger.focus(); }
+  });
+  // 用户经其它途径改 select.value 时（如测试 / 代码）保持标签同步
+  select.addEventListener('change', sync);
+
+  select._closeDropdown = close;
+  if (!_closeAllDropdowns) {
+    _closeAllDropdowns = () => {
+      document.querySelectorAll('.dropdown.open').forEach((d) => {
+        d.classList.remove('open');
+        const t = d.querySelector('.dropdown-trigger'); if (t) t.setAttribute('aria-expanded', 'false');
+        const p = d.querySelector('.dropdown-panel'); if (p) setTimeout(() => { if (!d.classList.contains('open')) p.hidden = true; }, 320);
+      });
+    };
+    document.addEventListener('click', (e) => { if (!e.target.closest('.dropdown')) _closeAllDropdowns(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') _closeAllDropdowns(); });
+  }
+}
+
+function hydrateDropdowns(root = document) {
+  (root || document).querySelectorAll('select').forEach(hydrateDropdown);
+}
+function syncAllDropdowns(root = document) {
+  (root || document).querySelectorAll('select').forEach((s) => s._syncDropdown && s._syncDropdown());
+}
+
 async function switchScale(value) {
   state.scale = value;
   state.targets = {};
@@ -2526,6 +2681,7 @@ export function init() {
   wire();
   refreshSolveButton();
   setupLongPressTips();
+  hydrateDropdowns(document); // 把工具栏 / 量表切换等原生 select 升级为自研下拉
 }
 
 function camel(id) {
@@ -2594,6 +2750,7 @@ function buildTypologyTarget() {
     s.value = state.targets[s.dataset.dim] || '';
     s.addEventListener('change', onTypDimChanged);
   }
+  hydrateDropdowns(dom.scaleList);
   applySearch();
 }
 
@@ -2619,6 +2776,7 @@ function onTypDimChanged(event) {
   const type = data.scales.map((sc) => state.targets[sc.name] || '').join('');
   const quick = dom.scaleList.querySelector('#typ-type');
   if (quick) quick.value = type.length === 4 && !type.includes('') ? type : '';
+  syncAllDropdowns(dom.scaleList); // 维度下拉被程序回填，刷新各自标签
   refreshSolveButton();
 }
 
