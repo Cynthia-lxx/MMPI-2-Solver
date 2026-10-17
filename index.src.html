@@ -157,6 +157,8 @@
     border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
   }
   .spacer { flex: 1 1 auto; }
+  /* 桌面端：包裹层透明，按钮仍作为 .toolbar 的直接弹性子项（零回归）；移动端改为整行 */
+  .toolbar-actions { display: contents; }
   button {
     font: inherit; padding: 6px 13px; border-radius: 6px; cursor: pointer;
     border: 1px solid var(--line); background: var(--input-bg); color: var(--ink);
@@ -185,12 +187,19 @@
     header h1 { font-size: 17px; }
     header p { font-size: 12px; }
     .toolbar {
-      flex-wrap: nowrap; overflow-x: auto; gap: 10px;
-      padding: 10px 14px; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px;
+      padding: 12px 14px; overflow: visible;
     }
-    .toolbar::-webkit-scrollbar { display: none; }
-    .toolbar label, .toolbar .check { flex: 0 0 auto; white-space: nowrap; font-size: 12px; }
-    .toolbar .spacer { flex: 0 0 4px; }
+    .toolbar label, .toolbar .check {
+      display: flex; flex-direction: column; align-items: stretch; gap: 4px;
+      white-space: normal; font-size: 12px;
+    }
+    .toolbar .check { flex-direction: row; align-items: center; }
+    .toolbar label.lang { grid-column: 1 / -1; }
+    .toolbar select, .toolbar input { width: 100%; }
+    .toolbar .spacer { display: none; }
+    .toolbar-actions { display: flex; grid-column: 1 / -1; gap: 8px; }
+    .toolbar-actions button { flex: 1 1 0; min-width: 0; }
     main { padding: 12px 14px 32px; gap: 14px; }
     .panel { padding: 12px 12px 16px; }
     .grid { grid-template-columns: repeat(auto-fill, minmax(48px, 1fr)); gap: 3px; }
@@ -580,7 +589,7 @@
     </select>
   </label>
   <label class="check"><input id="show-text" type="checkbox"> 显示题干</label>
-  <label>题干语言
+  <label class="lang">题干语言
     <select id="text-lang">
       <option value="zh">中文</option>
       <option value="en">英文原文</option>
@@ -588,9 +597,11 @@
     </select>
   </label>
   <span class="spacer"></span>
-  <button id="theme-toggle" class="ghost" type="button">🌙 深色</button>
-  <button id="example" class="mmpi2-only">载入示例</button>
-  <button id="clear">清空</button>
+  <div class="toolbar-actions">
+    <button id="theme-toggle" class="ghost" type="button">🌙 深色</button>
+    <button id="example" class="mmpi2-only">载入示例</button>
+    <button id="clear">清空</button>
+  </div>
 </div>
 
 <main>
