@@ -243,7 +243,18 @@
     max-width: 1480px; margin: 22px auto 0; padding-top: 14px;
     border-top: 1px solid var(--line); font-size: 12px; color: var(--muted);
   }
-  .credits-bottom strong { color: var(--ink); }
+  /* Developer signature: trans-flag pink/white/blue gradient (sampled from the reference: #eaacb8 / #ffffff / #7acbf5). */
+  .dev-name {
+    font-weight: 700;
+    background: linear-gradient(90deg, #eaacb8 0%, #ffffff 50%, #7acbf5 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  /* Light theme: the white mid-stop blends into the white panel, so add a hairline stroke for legibility. */
+  :root:not([data-theme="dark"]) .dev-name {
+    -webkit-text-stroke: .4px rgba(14, 23, 30, .45);
+  }
   @media (max-width: 760px) {
     .credits-inner { grid-template-columns: 1fr; gap: 22px; }
     .credits-cols { grid-template-columns: 1fr 1fr; gap: 18px; }
@@ -917,7 +928,7 @@
       </section>
       <section class="credits-col">
         <h3>联系 CONTACT</h3>
-        <span>开发者：CynthiaLx_</span>
+        <span>开发者：<strong class="dev-name">CynthiaLx_</strong></span>
         <a href="https://wpa.qq.com/msgrd?v=3&amp;uin=3924522420&amp;site=qq&amp;menu=yes" target="_blank" rel="noopener noreferrer">QQ：3924522420</a>
         <a href="mailto:wjz-space@outlook.com">邮箱：wjz-space@outlook.com</a>
       </section>
@@ -925,7 +936,7 @@
   </div>
   <div class="credits-bottom">
     <span>© 2026 PsychoInverse. All rights reserved.</span>
-    <span>Maintained by <strong>CynthiaLx_</strong></span>
+    <span>Maintained by <strong class="dev-name">CynthiaLx_</strong></span>
   </div>
 </footer>
 
