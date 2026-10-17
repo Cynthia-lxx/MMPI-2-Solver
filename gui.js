@@ -2779,6 +2779,44 @@ export function init() {
   setupLongPressTips();
   hydrateDropdowns(document); // 把工具栏 / 量表切换等原生 select 升级为自研下拉
   setupAnimatedDetails(document);
+  setupCollapsibleToolbar();
+}
+
+function setupCollapsibleToolbar() {
+  const toolbar = document.getElementById('toolbar');
+  const toggle = document.getElementById('toolbar-toggle');
+  const summary = document.getElementById('toolbar-summary');
+  if (!toolbar || !toggle) return;
+  const KEY = 'mmpi2.toolbarCollapsed';
+  const isMobile = () =>
+    typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 640px)').matches;
+  let collapsed;
+  try {
+    const saved = localStorage.getItem(KEY);
+    collapsed = saved === null ? isMobile() : saved === '1';
+  } catch (e) { collapsed = isMobile(); }
+  const apply = (val) => {
+    collapsed = val;
+    toolbar.classList.toggle('collapsed', collapsed);
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+  };
+  apply(collapsed);
+  toggle.addEventListener('click', (e) => {
+    e.preventDefault();
+    apply(!collapsed);
+    try { localStorage.setItem(KEY, collapsed ? '1' : '0'); } catch (e2) { /* 隐私模式忽略 */ }
+  });
+  // 收起时在标题栏显示当前量表名，避免展开才知道上下文
+  const sel = document.getElementById('scale-switch');
+  const updateSummary = () => {
+    if (!summary || !sel || !sel.options.length) return;
+    const opt = sel.options[sel.selectedIndex];
+    summary.textContent = opt ? opt.textContent : '';
+  };
+  updateSummary();
+  if (sel) sel.addEventListener('change', updateSummary);
+  // 量表选项可能在异步初始化后填充，稍后再刷新一次摘要
+  setTimeout(updateSummary, 400);
 }
 
 function camel(id) {

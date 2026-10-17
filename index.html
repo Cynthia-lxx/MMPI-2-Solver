@@ -139,6 +139,8 @@
     /* 版块展开 / 收起 + 摘要箭头旋转 */
     .details-body { transition: grid-template-rows var(--anim-med) var(--ease-out); }
     summary::after { transition: transform var(--anim-fast) ease; }
+    /* 工具栏收起栏箭头旋转 */
+    .toolbar-toggle-chevron { transition: transform var(--anim-fast) ease; }
   }
   * { box-sizing: border-box; }
   body {
@@ -169,6 +171,9 @@
   .spacer { flex: 1 1 auto; }
   /* 桌面端：包裹层透明，按钮仍作为 .toolbar 的直接弹性子项（零回归）；移动端改为整行 */
   .toolbar-actions { display: contents; }
+  /* 收起栏仅移动端可见；桌面端包裹层透明，保持原有单行布局 */
+  .toolbar-toggle { display: none; }
+  .toolbar-body { display: contents; }
   button {
     font: inherit; padding: 6px 13px; border-radius: 6px; cursor: pointer;
     border: 1px solid var(--line); background: var(--input-bg); color: var(--ink);
@@ -196,20 +201,42 @@
     header { padding: 12px 14px 10px; }
     header h1 { font-size: 17px; }
     header p { font-size: 12px; }
-    .toolbar {
-      display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px;
-      padding: 12px 14px; overflow: visible;
+    .toolbar { display: block; padding: 0; overflow: visible; position: static; }
+    .toolbar.collapsed { position: sticky; top: 0; }
+    .toolbar-toggle {
+      display: flex; align-items: center; gap: 8px; width: 100%;
+      padding: 10px 14px; border: 0; border-radius: 0; background: transparent;
+      color: var(--ink); font-size: 13px; text-align: left; cursor: pointer;
     }
-    .toolbar label, .toolbar .check {
+    .toolbar-toggle:hover:not(:disabled) { color: var(--ink); border-color: transparent; }
+    .toolbar-toggle:active { background: var(--code-bg); }
+    .toolbar-toggle-text { flex: 0 0 auto; font-weight: 650; }
+    .toolbar-toggle-summary {
+      min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      color: var(--muted); font-size: 12px;
+    }
+    .toolbar:not(.collapsed) .toolbar-toggle-summary { display: none; }
+    .toolbar-toggle-chevron {
+      flex: 0 0 auto; margin-left: auto; width: 8px; height: 8px;
+      border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted);
+      transform: rotate(45deg);
+    }
+    .toolbar:not(.collapsed) .toolbar-toggle-chevron { transform: rotate(-135deg); }
+    .toolbar.collapsed .toolbar-body { display: none; }
+    .toolbar-body {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px;
+      padding: 0 14px 12px;
+    }
+    .toolbar-body label, .toolbar-body .check {
       display: flex; flex-direction: column; align-items: stretch; gap: 4px;
       white-space: normal; font-size: 12px;
     }
-    .toolbar .check { flex-direction: row; align-items: center; }
-    .toolbar label.lang { grid-column: 1 / -1; }
-    .toolbar select, .toolbar input { width: 100%; }
-    .toolbar .spacer { display: none; }
-    .toolbar-actions { display: flex; grid-column: 1 / -1; gap: 8px; }
-    .toolbar-actions button { flex: 1 1 0; min-width: 0; }
+    .toolbar-body .check { flex-direction: row; align-items: center; }
+    .toolbar-body label.lang { grid-column: 1 / -1; }
+    .toolbar-body select, .toolbar-body input { width: 100%; }
+    .toolbar-body .spacer { display: none; }
+    .toolbar-body .toolbar-actions { display: flex; grid-column: 1 / -1; gap: 8px; }
+    .toolbar-body .toolbar-actions button { flex: 1 1 0; min-width: 0; }
     main { padding: 12px 14px 32px; gap: 14px; }
     .panel { padding: 12px 12px 16px; }
     .grid { grid-template-columns: repeat(auto-fill, minmax(48px, 1fr)); gap: 3px; }
@@ -575,7 +602,13 @@
   <p>指定预期 T 分，反求出满足该剖面的 567 题答卷，并标出哪些题目的回答是被锁定的、哪些可以自由组合。</p>
 </header>
 
-<div class="toolbar">
+<div class="toolbar" id="toolbar">
+  <button type="button" class="toolbar-toggle" id="toolbar-toggle" aria-expanded="true" aria-controls="toolbar-body">
+    <span class="toolbar-toggle-text">筛选与设置</span>
+    <span class="toolbar-toggle-summary" id="toolbar-summary"></span>
+    <span class="toolbar-toggle-chevron" aria-hidden="true"></span>
+  </button>
+  <div class="toolbar-body" id="toolbar-body">
   <label>量表
     <select id="scale-switch"></select>
   </label>
@@ -607,10 +640,11 @@
     </select>
   </label>
   <span class="spacer"></span>
-  <div class="toolbar-actions">
-    <button id="theme-toggle" class="ghost" type="button">🌙 深色</button>
-    <button id="example" class="mmpi2-only">载入示例</button>
-    <button id="clear">清空</button>
+    <div class="toolbar-actions">
+      <button id="theme-toggle" class="ghost" type="button">🌙 深色</button>
+      <button id="example" class="mmpi2-only">载入示例</button>
+      <button id="clear">清空</button>
+    </div>
   </div>
 </div>
 
@@ -6734,6 +6768,44 @@ function init() {
   setupLongPressTips();
   hydrateDropdowns(document); // 把工具栏 / 量表切换等原生 select 升级为自研下拉
   setupAnimatedDetails(document);
+  setupCollapsibleToolbar();
+}
+
+function setupCollapsibleToolbar() {
+  const toolbar = document.getElementById('toolbar');
+  const toggle = document.getElementById('toolbar-toggle');
+  const summary = document.getElementById('toolbar-summary');
+  if (!toolbar || !toggle) return;
+  const KEY = 'mmpi2.toolbarCollapsed';
+  const isMobile = () =>
+    typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 640px)').matches;
+  let collapsed;
+  try {
+    const saved = localStorage.getItem(KEY);
+    collapsed = saved === null ? isMobile() : saved === '1';
+  } catch (e) { collapsed = isMobile(); }
+  const apply = (val) => {
+    collapsed = val;
+    toolbar.classList.toggle('collapsed', collapsed);
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+  };
+  apply(collapsed);
+  toggle.addEventListener('click', (e) => {
+    e.preventDefault();
+    apply(!collapsed);
+    try { localStorage.setItem(KEY, collapsed ? '1' : '0'); } catch (e2) { /* 隐私模式忽略 */ }
+  });
+  // 收起时在标题栏显示当前量表名，避免展开才知道上下文
+  const sel = document.getElementById('scale-switch');
+  const updateSummary = () => {
+    if (!summary || !sel || !sel.options.length) return;
+    const opt = sel.options[sel.selectedIndex];
+    summary.textContent = opt ? opt.textContent : '';
+  };
+  updateSummary();
+  if (sel) sel.addEventListener('change', updateSummary);
+  // 量表选项可能在异步初始化后填充，稍后再刷新一次摘要
+  setTimeout(updateSummary, 400);
 }
 
 function camel(id) {
