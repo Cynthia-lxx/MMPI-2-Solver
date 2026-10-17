@@ -411,7 +411,7 @@
         <button id="import-target" class="mmpi2-only">用作求解目标</button>
       </div>
       <p id="import-note" class="hint"></p>
-      <p class="hint">评分只算剖面，不求解。未作答的题会随机填充（会告诉你填了哪些）。
+      <p id="import-hint" class="hint">评分只算剖面，不求解。未作答的题会随机填充（会告诉你填了哪些）。
         「用作求解目标」把读入剖面的 13 个基本量表设为目标，便于反推等价答卷。</p>
     </details>
 
@@ -447,14 +447,16 @@
       <table id="target-table"></table>
 
       <details>
-        <summary>完整剖面（87 个量表，橙色 ≥ 65、红色 ≥ 80）</summary>
+        <summary id="summary-profile">完整剖面（87 个量表，橙色 ≥ 65、红色 ≥ 80）</summary>
         <div id="profile"></div>
       </details>
 
-      <h3 id="h-answers">567 题回答<span id="free-count" class="chip"></span></h3>
-      <p class="hint">紫色虚线框为「自由题」：翻转它不会改变任何目标量表的分数，点击即可切换；
+      <h3 id="h-answers"><span id="h-answers-label">567 题回答</span><span id="free-count" class="chip"></span></h3>
+      <p class="hint mmpi2-only">紫色虚线框为「自由题」：翻转它不会改变任何目标量表的分数，点击即可切换；
         蓝色虚线框为「区间内可翻转」——它会改动目标量表，但翻过去后目标仍落在区间内，只能一道一道改；
         实线框为锁定题，翻转会破坏目标（悬停可看它影响哪些量表）。</p>
+      <p class="hint scl90-only">滑轨按选项分块；白框是该题在当前目标下的可行区间（框越窄越受限，只剩一格即锁定）。
+        拖动会在同因子内自动调平，目标均分保持不变；也可点选滑轨或用方向键微调。</p>
       <div id="answers" class="grid"></div>
     </div>
   </section>

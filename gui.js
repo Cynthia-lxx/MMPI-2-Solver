@@ -1670,6 +1670,33 @@ function buildExportPanel() {
   ).join('');
 }
 
+/**
+ * 导入区文案按当前量表自动生成：题数、选项数、作答类型都从 data / formats 取，
+ * 新增量表（-3~3、1~7、1~100 等）无需再改这里。
+ */
+function applyScaleCopy() {
+  if (!dom.importText) return;
+  const data = currentData();
+  const desc = itemFormatDesc(data, 1);
+  if (desc.type === 'binary') {
+    dom.importText.placeholder =
+      `粘贴 ${data.nItems} 个字符的 T/F 串，或每行一个答案（T / F、True / False、是 / 否），也可每行「题号,答案」`;
+    if (dom.importHint) {
+      dom.importHint.textContent =
+        '评分只算剖面，不求解。未作答的题会随机填充（会告诉你填了哪些）。' +
+        '「用作求解目标」把读入剖面的 13 个基本量表设为目标，便于反推等价答卷。';
+    }
+    return;
+  }
+  const m = desc.levels.length;
+  dom.importText.placeholder =
+    `粘贴 ${data.nItems} 位 ${m} 级得分串（1–${m}），或每行「题号,得分」（1–${m}）`;
+  if (dom.importHint) {
+    dom.importHint.textContent =
+      `评分只算剖面，不求解。未作答的题按最低档（1）计；共 ${data.nItems} 题、每题 ${m} 档。`;
+  }
+}
+
 function runExport() {
   if (isScl90()) {
     if (!state.answers) {
@@ -1693,7 +1720,7 @@ function runExport() {
       lines.push(`${f.name},${val},${sev}`);
     }
     download('scl90-export.csv', lines.join('\r\n'), 'text/csv;charset=utf-8');
-    setNote(`已导出 scl90-export.csv（90 题 + 12 维度剖面）。`);
+    setNote(`已导出 scl90-export.csv（90 题 + 10 因子剖面）。`);
     return;
   }
   const picked = [...dom.exportContents.querySelectorAll('input[data-content]')]
@@ -2156,15 +2183,17 @@ function switchScale(value) {
   const panel = dom.scaleList.closest('.panel');
   const leftH2 = panel ? panel.querySelector('h2') : null;
   const hTarget = document.getElementById('h-target');
-  const hAnswers = document.getElementById('h-answers');
+  const hAnswersLabel = document.getElementById('h-answers-label');
   const hBank = document.getElementById('h-bank');
+  const summaryProfile = document.getElementById('summary-profile');
   if (isScl90()) {
     if (h1) h1.textContent = 'SCL-90 自评量表';
     if (hp) hp.textContent = '选择各因子的目标严重度，反推出一份 90 题作答；或直接导入、编辑并评分。';
     if (leftH2) leftH2.textContent = '目标因子均分';
     if (hTarget) hTarget.textContent = '因子均分达成';
-    if (hAnswers) hAnswers.textContent = '90 题回答';
+    if (hAnswersLabel) hAnswersLabel.textContent = '90 题回答';
     if (hBank) hBank.textContent = '题库（90 题原文）';
+    if (summaryProfile) summaryProfile.textContent = '完整剖面（9 临床因子 + 其他 + 总分）';
     if (dom.copy) dom.copy.textContent = '复制得分串';
     setNote('已切换到 SCL-90。选定因子严重度后点「生成答卷」。');
   } else {
@@ -2172,12 +2201,14 @@ function switchScale(value) {
     if (hp) hp.textContent = '指定预期 T 分，反求出满足该剖面的 567 题答卷，并标出哪些题目的回答是被锁定的、哪些可以自由组合。';
     if (leftH2) leftH2.textContent = '目标 T 分';
     if (hTarget) hTarget.textContent = '目标达成';
-    if (hAnswers) hAnswers.textContent = '567 题回答';
+    if (hAnswersLabel) hAnswersLabel.textContent = '567 题回答';
     if (hBank) hBank.textContent = '题库（567 题原文）';
+    if (summaryProfile) summaryProfile.textContent = '完整剖面（87 个量表，橙色 ≥ 65、红色 ≥ 80）';
     if (dom.copy) dom.copy.textContent = '复制 T/F';
   }
   buildScaleList();
   buildExportPanel();
+  applyScaleCopy();
   invalidate('已切换量表，请重新选择目标。');
 }
 
@@ -2187,7 +2218,7 @@ export function init() {
     'example', 'clear', 'solve', 'again', 'shuffle', 'copy', 'csv', 'status', 'results',
     'target-table', 'profile', 'answers', 'free-count', 'show-text',
     'export-contents', 'export-format', 'export-english', 'export-run-panel',
-    'import-text', 'import-file', 'import-score', 'import-target', 'import-note',
+    'import-text', 'import-file', 'import-score', 'import-target', 'import-note', 'import-hint',
     'text-lang', 'bank-search', 'bank-filter', 'bank-table', 'bank-count',
     'target-mode', 'theme-toggle',
   ];
@@ -2212,6 +2243,7 @@ export function init() {
   }
   buildScaleList();
   buildExportPanel();
+  applyScaleCopy();
   renderItemBank();
   wire();
   refreshSolveButton();
