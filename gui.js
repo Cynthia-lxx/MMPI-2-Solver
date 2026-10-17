@@ -54,17 +54,59 @@ import { GAD7_DATA } from './gad7.data.js';
 import { HADS_DATA } from './hads.data.js';
 import { WHO5_DATA } from './who5.data.js';
 
-// MBTI 类型学题本（93 / 16personalities 28·93·200 / 200题md / 60题KNN 数据集）
-import { MBTI93_DATA } from './mbti_93.data.js';
-import { MBTI16P_QUICK_DATA } from './mbti_16p_quick.data.js';
-import { MBTI16P_STANDARD_DATA } from './mbti_16p_standard.data.js';
-import { MBTI16P_FULL_DATA } from './mbti_16p_full.data.js';
-import { MBTI200MD_DATA } from './mbti_200md.data.js';
-import { MBTI16P60_DATA } from './mbti_16p60.data.js';
-import {
-  mbtiScore, mbtiSolve, mbtiScoreKnn, mbtiParseAnswers, mbtiExportCsv,
-} from './mbti.js';
-import { MBTI_TYPES_16 } from './mbti_types.js';
+// MBTI 数据/引擎按需异步加载：首屏不内联 1 万条 KNN 样本，切到 MBTI 时才拉取。
+let MBTI_TYPES_16 = [];
+let mbtiScore, mbtiSolve, mbtiScoreKnn, mbtiParseAnswers, mbtiExportCsv;
+let mbtiLoadState = 'idle';
+let mbtiReadyResolve;
+export const mbtiReady = new Promise((r) => { mbtiReadyResolve = r; });
+
+async function loadMbtiIndividual() {
+  const [a, b, c, d, e, f, eng, types] = await Promise.all([
+    import('./mbti_93.data.js'),
+    import('./mbti_16p_quick.data.js'),
+    import('./mbti_16p_standard.data.js'),
+    import('./mbti_16p_full.data.js'),
+    import('./mbti_200md.data.js'),
+    import('./mbti_16p60.data.js'),
+    import('./mbti.js'),
+    import('./mbti_types.js'),
+  ]);
+  return {
+    MBTI93_DATA: a.MBTI93_DATA, MBTI16P_QUICK_DATA: b.MBTI16P_QUICK_DATA,
+    MBTI16P_STANDARD_DATA: c.MBTI16P_STANDARD_DATA, MBTI16P_FULL_DATA: d.MBTI16P_FULL_DATA,
+    MBTI200MD_DATA: e.MBTI200MD_DATA, MBTI16P60_DATA: f.MBTI16P60_DATA,
+    mbtiScore: eng.mbtiScore, mbtiSolve: eng.mbtiSolve, mbtiScoreKnn: eng.mbtiScoreKnn,
+    mbtiParseAnswers: eng.mbtiParseAnswers, mbtiExportCsv: eng.mbtiExportCsv,
+    MBTI_TYPES_16: types.MBTI_TYPES_16,
+  };
+}
+
+async function ensureMbti() {
+  if (mbtiLoadState === 'ready') return;
+  if (mbtiLoadState === 'loading') { await mbtiReady; return; }
+  mbtiLoadState = 'loading';
+  let mod;
+  try {
+    mod = await import('./mbti.async.js');
+  } catch {
+    mod = await loadMbtiIndividual();
+  }
+  MBTI_TYPES_16 = mod.MBTI_TYPES_16 || [];
+  mbtiScore = mod.mbtiScore;
+  mbtiSolve = mod.mbtiSolve;
+  mbtiScoreKnn = mod.mbtiScoreKnn;
+  mbtiParseAnswers = mod.mbtiParseAnswers;
+  mbtiExportCsv = mod.mbtiExportCsv;
+  SCALES.mbti93.data = mod.MBTI93_DATA;
+  SCALES.mbti16p28.data = mod.MBTI16P_QUICK_DATA;
+  SCALES.mbti16p93.data = mod.MBTI16P_STANDARD_DATA;
+  SCALES.mbti16p200.data = mod.MBTI16P_FULL_DATA;
+  SCALES.mbti200md.data = mod.MBTI200MD_DATA;
+  SCALES.mbti16p60.data = mod.MBTI16P60_DATA;
+  mbtiLoadState = 'ready';
+  mbtiReadyResolve();
+}
 
 /** 量表注册表：加一个新量表 = 在这里加一行 + 一个数据模块 + 下拉里加一个 option。 */
 const SCALES = {
@@ -74,12 +116,12 @@ const SCALES = {
   gad7: { id: 'gad7', label: 'GAD-7 焦虑筛查量表', binary: false, data: GAD7_DATA },
   hads: { id: 'hads', label: 'HADS 焦虑抑郁量表', binary: false, data: HADS_DATA },
   who5: { id: 'who5', label: 'WHO-5 主观幸福感量表', binary: false, data: WHO5_DATA },
-  mbti93: { id: 'mbti93', label: 'MBTI 职业性格测试（93 题）', typology: true, data: MBTI93_DATA },
-  mbti16p28: { id: 'mbti16p_quick', label: '16personalities 快速版（28 题）', typology: true, data: MBTI16P_QUICK_DATA },
-  mbti16p93: { id: 'mbti16p_standard', label: '16personalities 标准版（93 题）', typology: true, data: MBTI16P_STANDARD_DATA },
-  mbti16p200: { id: 'mbti16p_full', label: '16personalities 完整版（200 题）', typology: true, data: MBTI16P_FULL_DATA },
-  mbti200md: { id: 'mbti200md', label: 'MBTI 200 题（权威完整版）', typology: true, data: MBTI200MD_DATA },
-  mbti16p60: { id: 'mbti16p60', label: '16personalities 60 题（KNN 数据集）', typology: true, data: MBTI16P60_DATA },
+  mbti93: { id: 'mbti93', label: 'MBTI 职业性格测试（93 题）', typology: true, data: null },
+  mbti16p28: { id: 'mbti16p_quick', label: '16personalities 快速版（28 题）', typology: true, data: null },
+  mbti16p93: { id: 'mbti16p_standard', label: '16personalities 标准版（93 题）', typology: true, data: null },
+  mbti16p200: { id: 'mbti16p_full', label: '16personalities 完整版（200 题）', typology: true, data: null },
+  mbti200md: { id: 'mbti200md', label: 'MBTI 200 题（权威完整版）', typology: true, data: null },
+  mbti16p60: { id: 'mbti16p60', label: '16personalities 60 题（KNN 数据集）', typology: true, data: null },
 };
 
 /** 当前量表的元数据。 */
@@ -2346,10 +2388,15 @@ function renderLikertProfile(input) {
     `<table><thead><tr><th>因子</th><th>均分/总分</th><th>解释</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-function switchScale(value) {
+async function switchScale(value) {
   state.scale = value;
   state.targets = {};
   document.body.setAttribute('data-scale', value);
+  const meta = SCALES[value];
+  if (meta && meta.typology && !meta.data) {
+    setNote('正在加载 MBTI 题本数据…');
+    await ensureMbti();
+  }
   const targetTable = dom.targetTable;
   if (targetTable) targetTable.hidden = isTypology();
   const hTargetEl = document.getElementById('h-target');

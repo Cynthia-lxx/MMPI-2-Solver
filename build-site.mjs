@@ -27,6 +27,15 @@ const SOURCES = [
 ];
 const SRC = 'index.src.html';
 
+// MBTI 数据/引擎拆成独立异步分包：首屏核心包不含 1 万条 KNN 样本（13.5MB），
+// 切到 MBTI 时才由 gui.js 动态 import('./mbti.async.js') 拉取。
+const MBTI_ASYNC = [
+  'mbti_93.data.js', 'mbti_16p_quick.data.js', 'mbti_16p_standard.data.js',
+  'mbti_16p_full.data.js', 'mbti_200md.data.js', 'mbti_16p60.data.js',
+  'mbti.js', 'mbti_types.js',
+];
+const CORE_SOURCES = SOURCES.filter((f) => !MBTI_ASYNC.includes(f));
+
 /** Drop ES module syntax so the bundle runs as one classic <script>. */
 function stripModule(source) {
   return source
@@ -36,7 +45,7 @@ function stripModule(source) {
     .replace(/^(\s*)export\s+/gm, '$1');
 }
 
-const bundle = SOURCES.map((name) => {
+const bundle = CORE_SOURCES.map((name) => {
   const code = stripModule(readFileSync(join(root, name), 'utf8')).trim();
   return `/* ===== ${name} ===== */\n${code}`;
 }).join('\n\n');
@@ -49,4 +58,10 @@ if (!template.includes(marker)) {
 const html = template.replace(marker, `<script>\n${bundle}\n</script>`);
 
 writeFileSync(join(root, 'index.html'), html);
-console.log(`wrote index.html (${(html.length / 1024).toFixed(0)} KiB) from ${SOURCES.join(', ')}`);
+
+// 异步分包：薄 re-export 封装，复用已提交的各 MBTI 模块（不重复存储 13.5MB 样本）。
+const mbtiWrapper = MBTI_ASYNC.map((f) => `export * from './${f}';`).join('\n') + '\n';
+writeFileSync(join(root, 'mbti.async.js'), mbtiWrapper);
+
+const coreKib = (html.length / 1024).toFixed(0);
+console.log(`wrote index.html (${coreKib} KiB, core; MBTI excluded) + mbti.async.js (async wrapper over ${MBTI_ASYNC.length} modules)`);

@@ -18,7 +18,7 @@ globalThis.window = dom.window;
 Object.defineProperty(globalThis, 'navigator', { value: dom.window.navigator, configurable: true });
 globalThis.localStorage = dom.window.localStorage;
 
-await import('./gui.js');
+const gui = await import('./gui.js');
 const { document } = globalThis;
 const win = dom.window;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -51,6 +51,11 @@ const setScale = (id) => {
   scaleSwitch.dispatchEvent(new win.Event('change'));
 };
 const countCells = (html) => (html.match(/class="cell typ/g) || []).length;
+
+/* 先用首屏之外的 MBTI 异步分包预热：触发加载并等待就绪（首屏核心包不含这些数据） */
+setScale('mbti93');
+await gui.mbtiReady;
+await wait(50);
 
 /* 1. 每个 MBTI 题本：切到 → 选 INTJ → 生成 → 检查格数与达成状态 */
 for (const id of MBTI_IDS) {
