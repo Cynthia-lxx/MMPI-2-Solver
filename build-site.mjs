@@ -10,7 +10,7 @@
 //
 // Mirrors _port/build_gui.py in the parent MMPI_2_Grader repo.
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -81,5 +81,12 @@ writeFileSync(join(root, 'index.html'), html);
 const mbtiWrapper = MBTI_ASYNC.map((f) => `export * from './${f}';`).join('\n') + '\n';
 writeFileSync(join(root, 'mbti.async.js'), mbtiWrapper);
 
+// 各 MBTI 分包真实字节数：进度条按数据量（而非模块数）统计；fetch 不可用或 file:// 时作回退分母。
+const mbtiSizes = {};
+for (const f of MBTI_ASYNC) {
+  try { mbtiSizes[f] = statSync(join(root, f)).size; } catch { mbtiSizes[f] = 0; }
+}
+writeFileSync(join(root, 'mbti.sizes.js'), `export const MBTI_SIZES = ${JSON.stringify(mbtiSizes, null, 2)};\n`);
+
 const coreKib = (html.length / 1024).toFixed(0);
-console.log(`wrote index.html (${coreKib} KiB, core; MBTI excluded) + mbti.async.js (async wrapper over ${MBTI_ASYNC.length} modules)`);
+console.log(`wrote index.html (${coreKib} KiB, core; MBTI excluded) + mbti.async.js (wrapper over ${MBTI_ASYNC.length} modules) + mbti.sizes.js (byte manifest)`);

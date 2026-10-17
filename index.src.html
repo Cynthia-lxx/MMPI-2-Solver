@@ -179,6 +179,13 @@
   .loadbar[hidden] { display: none; }
   .loadbar-fill { height: 100%; width: 0; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
   .loadbar.done .loadbar-fill { opacity: 0; }
+  .loadbar-pct {
+    position: fixed; top: 6px; right: 8px; z-index: 1001;
+    padding: 2px 6px; border-radius: 5px; font-size: 11px; line-height: 1;
+    font-variant-numeric: tabular-nums; color: var(--accent);
+    background: var(--bg); box-shadow: 0 1px 4px rgba(0, 0, 0, .18);
+  }
+  .loadbar-pct[hidden] { display: none; }
   button {
     font: inherit; padding: 6px 13px; border-radius: 6px; cursor: pointer;
     border: 1px solid var(--line); background: var(--input-bg); color: var(--ink);
@@ -608,6 +615,7 @@
 <div class="loadbar" id="loadbar" hidden role="progressbar" aria-label="加载进度">
   <div class="loadbar-fill" id="loadbar-fill"></div>
 </div>
+<div class="loadbar-pct" id="loadbar-pct" hidden aria-hidden="true"></div>
 <header>
   <h1>MMPI-2 反算器</h1>
   <p>指定预期 T 分，反求出满足该剖面的 567 题答卷，并标出哪些题目的回答是被锁定的、哪些可以自由组合。</p>

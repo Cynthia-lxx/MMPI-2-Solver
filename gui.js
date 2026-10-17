@@ -66,21 +66,27 @@ export const mbtiReady = new Promise((r) => { mbtiReadyResolve = r; });
 function showAsyncProgress(label) {
   const bar = document.getElementById('loadbar');
   const fill = document.getElementById('loadbar-fill');
+  const pctEl = document.getElementById('loadbar-pct');
   if (!bar || !fill) return { set() {}, finish() {} };
   bar.hidden = false;
+  if (pctEl) pctEl.hidden = false;
   bar.classList.remove('done');
   fill.style.width = '0%';
+  if (pctEl) pctEl.textContent = '0.000%';
   const set = (frac, detail) => {
-    const pct = Math.max(0, Math.min(1, frac || 0)) * 100;
-    fill.style.width = pct + '%';
-    setNote(detail ? `${label}（${detail}）` : label);
+    const p = Math.max(0, Math.min(1, frac || 0));
+    fill.style.width = (p * 100) + '%';
+    if (pctEl) pctEl.textContent = (p * 100).toFixed(3) + '%';
+    setNote(detail ? `${label}　${detail}` : label);
   };
   const finish = () => {
     fill.style.width = '100%';
+    if (pctEl) pctEl.textContent = '100.000%';
     bar.classList.add('done');
     setNote('');
     setTimeout(() => {
       bar.hidden = true;
+      if (pctEl) pctEl.hidden = true;
       bar.classList.remove('done');
       fill.style.width = '0%';
     }, 400);
@@ -89,19 +95,60 @@ function showAsyncProgress(label) {
   return { set, finish };
 }
 
-async function loadMbtiIndividual(onProgress) {
+async function loadMbtiTraffic(onProgress) {
   const files = [
     'mbti_93.data.js', 'mbti_16p_quick.data.js', 'mbti_16p_standard.data.js',
     'mbti_16p_full.data.js', 'mbti_200md.data.js', 'mbti_16p60.data.js',
     'mbti.js', 'mbti_types.js',
   ];
+  // 各分包真实字节数（构建期生成），用于按数据量统计进度；不可用则回退为按模块计数。
+  let sizes = {};
+  try { sizes = (await import('./mbti.sizes.js')).MBTI_SIZES || {}; } catch (e) { sizes = {}; }
+  const loaded = {};
+  let total = 0;
+  for (const f of files) { loaded[f] = 0; total += sizes[f] || 0; }
+  if (total === 0) total = files.length;
+  const fmt = (n) => {
+    if (n >= 1048576) return (n / 1048576).toFixed(2) + ' MB';
+    if (n >= 1024) return (n / 1024).toFixed(1) + ' KB';
+    return n + ' B';
+  };
+  const report = () => {
+    const cur = files.reduce((s, f) => s + loaded[f], 0);
+    const frac = total ? cur / total : 0;
+    onProgress(frac, `${(frac * 100).toFixed(3)}% · ${fmt(cur)} / ${fmt(total)}`);
+  };
   const out = {};
-  let done = 0;
   await Promise.all(files.map(async (f) => {
-    const mod = await import('./' + f);
+    let mod;
+    try {
+      if (typeof fetch !== 'function') throw new Error('no fetch');
+      const resp = await fetch('./' + f);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const len = Number(resp.headers.get('content-length')) || sizes[f] || 0;
+      const reader = resp.body && resp.body.getReader ? resp.body.getReader() : null;
+      if (!reader) throw new Error('no stream');
+      // 单次下载：边读字节边更新进度（真实流量），读完用 blob 导入执行，避免二次请求。
+      const chunks = [];
+      let got = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) { chunks.push(value); got += value.length; }
+        loaded[f] = got;
+        report();
+      }
+      const blob = new Blob(chunks, { type: 'text/javascript' });
+      const url = URL.createObjectURL(blob);
+      try { mod = await import(url); } finally { URL.revokeObjectURL(url); }
+      loaded[f] = len || got;
+    } catch (e) {
+      // 回退：直接动态 import（file:// 或 fetch 不可用场景），按字节数加权计数。
+      mod = await import('./' + f);
+      loaded[f] = sizes[f] || 1;
+    }
     Object.assign(out, mod);
-    done += 1;
-    if (onProgress) onProgress(done / files.length, `已加载 ${done}/${files.length}`);
+    report();
   }));
   return out;
 }
@@ -113,7 +160,7 @@ async function ensureMbti() {
   const progress = showAsyncProgress('正在加载 MBTI 题本数据…');
   let mod;
   try {
-    mod = await loadMbtiIndividual(progress.set);
+    mod = await loadMbtiTraffic(progress.set);
   } catch (e) {
     try { mod = await import('./mbti.async.js'); } catch { mod = null; }
     progress.set(1);
